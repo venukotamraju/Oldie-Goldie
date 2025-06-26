@@ -1,0 +1,4 @@
+cffi==1.17.1
+cryptography==45.0.4
+pycparser==2.22
+websockets==15.0.1
