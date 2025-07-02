@@ -25,4 +25,7 @@ async def main():
         await asyncio.Future() # Run Forever
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("Keyboard interrupt detected. Server is now [shut down]")
