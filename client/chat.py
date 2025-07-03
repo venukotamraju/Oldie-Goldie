@@ -1,5 +1,6 @@
 import asyncio
 import websockets
+from aioconsole import ainput
 import logging
 from shared.protocol import encode_message, decode_message
 
@@ -17,11 +18,12 @@ logger = logging.getLogger(__name__)
 
 
 # Helper method for confirming exit
+# Async input for confirmation (still works fine with ainput)
 async def confirm_exit() -> bool:
     """ Prompt the user to confirm if they really want to exit """
 
     while True:
-        response = await asyncio.to_thread(input, "\n Confirm your will to exit (y/n) ")
+        response = await ainput("\n Confirm your will to exit (y/n) ")
         response = response.strip().lower()
         if response == "y":
             return True
@@ -31,11 +33,11 @@ async def confirm_exit() -> bool:
         else:
             logger.warning("You have to enter something [y/n]. come on -_-")
 
-def safe_input(prompt: str = "") -> str | None:
-    """ Safe input wrapper for use in threads. """
+async def safe_input(prompt: str = "") -> str | None:
+    """ Safe input wrapper with exception handling for keyboard interrupts and EOF errors as well as natively async input handling so to not block the event loop. (eliminates the need for spawning threads) """
 
     try:
-        return input(prompt)
+        return await ainput(prompt)
     
     except (KeyboardInterrupt, EOFError):
         logger.warning(" [safe_input] keyboard interrupt or EOF detected")
@@ -52,7 +54,7 @@ async def send_messages(websocket: websockets.ClientConnection, username: str):
 
     while True:
         try:
-            message = await asyncio.to_thread(safe_input, "")
+            message = await safe_input()
             
             # we caught KeyboardInterrupt from inside the thread
             if message is None:
@@ -128,12 +130,12 @@ async def main(username: str | None = None):
 
         # Get the username until the user enters a non-empty value
         while True:
-            username = await asyncio.to_thread(input,"\n Enter your username: ")
-            username = username.strip()
+            username = await ainput("\n Enter your username: ")
+            if username:
+                username = username.strip()
+                break
             if not username:
                 logger.warning("[main] Username cannot be empty... come on bro! :/")
-            else:
-                break
     
     # Connect to the websocket server via async context manager
     async with websockets.connect(SERVER_URI) as websocket:
