@@ -1,8 +1,14 @@
 import asyncio
 import websockets
-from aioconsole import ainput
 import logging
 from shared.protocol import encode_message, decode_message
+
+# Importing the async input utility function
+# This utility function is used to handle asynchronous input without blocking the event loop.
+from utilities import get_async_input
+
+# Importing ainput from the utility module
+ainput = get_async_input()
 
 # === Configuration === #
 SERVER_URI = "ws://localhost:8765"
@@ -96,6 +102,13 @@ async def send_messages(websocket: websockets.ClientConnection, username: str):
             logger.info("[send_messages] Task cancelled cleanly.")
             raise
 
+        except websockets.exceptions.ConnectionClosed:
+            # This exception occurs when the websocket connection is closed from/by the server
+            # or if the server is not running.
+            
+            logger.warning("[send_messages] Websocket connection closed from/by server.")
+            return
+
 async def receive_messages(websocket):
     """ Handles receiving and decoding messages from the websocket. """
 
@@ -143,7 +156,6 @@ async def main(username: str | None = None):
         send_task = asyncio.create_task(send_messages(websocket, username))
         receive_task = asyncio.create_task(receive_messages(websocket))
 
-
         try:
 
             # Process the tasks by waiting them accordingly
@@ -153,8 +165,7 @@ async def main(username: str | None = None):
             )
 
             # Cancel other tasks that did not finish
-            for task in pending:
-                
+            for task in pending:                
                 task.cancel()
                 
                 try:
@@ -178,7 +189,7 @@ async def main(username: str | None = None):
             raise
 
         finally:
-            logger.info("[main] All tasks completed or cancelled. Exiting Gracefully")
+            logger.info("[main] All tasks completed or cancelled. The app will exit automatically if not press 'Enter' to finish exiting. Thanks for using Secure Chat Client :)")
 
 
 if __name__ == "__main__":
