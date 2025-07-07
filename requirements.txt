@@ -1,5 +1,6 @@
-aioconsole==0.8.1
 cffi==1.17.1
 cryptography==45.0.4
+prompt_toolkit==3.0.51
 pycparser==2.22
+wcwidth==0.2.13
 websockets==15.0.1
