@@ -3,12 +3,21 @@ import websockets
 import logging
 from shared.protocol import encode_message, decode_message
 
-# Importing the async input utility function
-# This utility function is used to handle asynchronous input without blocking the event loop.
-from utilities import get_async_input
+# Importing the CommandHandler class from shared.command_handler module
+# This class is responsible for managing commands and their execution in the chat client.
+from shared.command_handler import CommandHandler
+
+# Importing the async input utility function and async print utility function
+# These functions are used to handle asynchronous input and output in the chat client.
+from utilities import get_async_input, get_async_print
 
 # Importing ainput from the utility module
+# This utility function is used to handle asynchronous input without blocking the event loop.
 ainput = get_async_input()
+
+# Importing aprint from the utility module
+# This utility function is used to handle asynchronous output without blocking the event loop.
+aprint = get_async_print()
 
 # === Configuration === #
 SERVER_URI = "ws://localhost:8765"
@@ -20,6 +29,9 @@ logging.basicConfig(
     )
 logger = logging.getLogger(__name__)
 # ===================== #
+
+# Importing the command handler for managing commands
+command_handler = CommandHandler()
 
 
 
@@ -39,15 +51,55 @@ async def confirm_exit() -> bool:
         else:
             logger.warning("You have to enter something [y/n]. come on -_-")
 
-async def safe_input(prompt: str = "") -> str | None:
-    """ Safe input wrapper with exception handling for keyboard interrupts and EOF errors as well as natively async input handling so to not block the event loop. (eliminates the need for spawning threads) """
+async def safe_input(prompt: str = "> ") -> str:
+    """ Safe input wrapper with exception handling for keyboard interrupts and EOF errors as well as natively async input handling so to not block the event loop which happens when we use conventional input which is blocking in nature. (eliminates the need for spawning threads)\n
+    This function is a wrapper around the ainput function from aioconsole, which allows for asynchronous input handling.\n
+    If a KeyboardInterrupt or EOFError occurs, it logs a warning and raises a KeyboardInterrupt to signal the user that input was interrupted.
+
+    Args:
+        prompt (str): The prompt to display to the user for input. Defaults to an empty string.
+    
+    Returns:
+        str: The user input as a string.
+    
+    Raises:
+        KeyboardInterrupt: If the user interrupts the input with Ctrl+C or EOF is detected.
+    """
 
     try:
         return await ainput(prompt)
     
     except (KeyboardInterrupt, EOFError):
         logger.warning(" [safe_input] keyboard interrupt or EOF detected")
-        return None # signal that we are interuppted
+        raise KeyboardInterrupt("Input interrupted by user or EOF detected. Exiting input loop.")
+
+# Registering commands with the command handler
+# This allows the chat client to recognize and execute commands like /help, /exit, etc
+# Register built-in commands
+async def cmd_exit(_: str):
+    """ Command to exit the chat client """
+    logger.info("[cmd_exit] User requested exit command.")
+    should_exit = await confirm_exit()
+    
+    if should_exit:
+        logger.info("[cmd_exit] User confirmed exit. Raising CancelledError to signal shutdown.")
+        raise asyncio.CancelledError
+    else:
+        logger.info("[cmd_exit] User chose not to exit. Resuming chat.")
+
+async def cmd_help(_: str):
+    """ Command to display help information """
+    help_text = (
+        "\nAvailable commands:\n"
+        "/help - Show this help message\n"
+        "/exit - Exit the chat client\n"
+        "Type your message and press Enter to send it.\n"
+    )
+    await aprint(help_text)
+
+command_handler.register_command("/exit", cmd_exit)
+command_handler.register_command("/help", cmd_help)
+# More can be registered like '/connect', 'whoami', etc. as needed
 
 async def send_messages(websocket: websockets.ClientConnection, username: str):
     """ 
@@ -61,41 +113,59 @@ async def send_messages(websocket: websockets.ClientConnection, username: str):
     while True:
         try:
             message = await safe_input()
-            
-            # we caught KeyboardInterrupt from inside the thread
-            if message is None:
-                logger.info("[send_messages] Input interrupted. Exiting message loop.")
-                break
+
+            # If the message is empty, we skip sending it
+            if message.strip() == "":
+                logger.info("[send_messages] Empty message entered. Skipping send.")
+                continue
             
             # Handle custom commands
             elif message.strip().startswith("/"):
                 
-                if message.strip() == "/exit":
-                    should_exit = await confirm_exit()
-                    
-                    if should_exit:        
-                        logger.info("[send_messages] User confirmed exit. Cancelling task.")
+                if command_handler.has_command(message):
+
+                    # Execute the command using the command handler
+                    try:
+                        await command_handler.execute_command(message)
+
+                    except asyncio.CancelledError:
+                        # If the command raises a CancelledError, we handle it here
+                        
+                        logger.info("[send_messages] Command execution cancelled. Exiting message loop.")
 
                         # This exception is raised when the /exit is processed and confirmed from the send_messages() 
                         # which raises and propogates `exception of the same` up-ward towards the event loop 
                         # alerting any other tasks that catches this exception to handle the cancelling.
-                        # Even if any tasks miss this signal, there is a preventative measure to cancel all the tasks in the main method                        
-                        raise asyncio.CancelledError
-                    
-                    else:
+                        # Even if any of the tasks miss this signal, there is a preventative measure to cancel all the tasks in the main method                        
+                        raise
+
+                    except Exception as e:
+                        # If any other exception occurs during command execution, log it
+                        
+                        logger.error(f"[send_messages] Error executing command '{message}': {e}")                   
                         continue
+
+                else:
+                    # If the command is not recognized, we log a warning
+                    
+                    logger.warning(f"[send_messages] Command '{message}' not recognized. Use /help to see available commands.")
+                    continue
             
             # Send the message if everything is fine
             else:
                 encoded = encode_message(message=message, sender=username)
                 await websocket.send(encoded)
 
-        # Precautionary Exception
         except KeyboardInterrupt:
-            # Most likely this exception won't be caught
-            # This exception would be generated by the input thread in the above try block and handled via the safe_input() method.
-            
-            logger.warning("[send_messages] KeyboardInterrupt caught unexpectedly.")
+            # This exception occurs when the user presses Ctrl+C
+            # This exception caught here is raised from the safe_input() method
+            # which is used to handle asynchronous input without blocking the event loop.
+            # It is caught here to prevent the event loop from crashing and to allow graceful shutdown.
+            # We log a warning and break the loop to exit gracefully.
+            # This is a good place to handle any cleanup or final messages before exiting.
+            # This is also caught in the main method to handle the cancellation of tasks.
+                        
+            logger.warning("[send_messages] Keyboard interrupt detected. Exiting message loop.")
             break
 
         except asyncio.CancelledError:
@@ -117,7 +187,7 @@ async def receive_messages(websocket):
         try:
             message = await websocket.recv()
             decoded = decode_message(message_str=message)
-            print(f"\n [{decoded['timestamp']}] {decoded['sender']}: {decoded['message']}")
+            print(f"\n\n [{decoded['timestamp']}] {decoded['sender']}: {decoded['message']}\n\n> ", end="")
 
         except websockets.exceptions.ConnectionClosed:
             # This exception occurs when a keyboard interrupt is experienced 
