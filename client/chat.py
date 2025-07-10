@@ -101,6 +101,90 @@ command_handler.register_command("/exit", cmd_exit)
 command_handler.register_command("/help", cmd_help)
 # More can be registered like '/connect', 'whoami', etc. as needed
 
+# ========================== #
+# 💬Connection State Logic   #
+# ========================== #
+
+# This section handles the connection state logic for the chat client.
+
+connection_state = {
+    "status": "idle",   # idle, waiting, requested
+    "target": None,     # Who we are talking to or requesting
+    "direction": None,  # incoming or outgoing
+}
+
+async def cmd_connect(line: str):
+    """ Initiate a connection request to another user """
+
+    parts = line.strip().split()
+    if len(parts) != 2 or not parts[1].startswith("@"):
+        await aprint("Usage: /connect @username")
+        return
+    
+    target_username = parts[1][1:]  # Remove the '@' symbol
+    if target_username == "":
+        await aprint("Invalid username. Please provide a valid username starting with '@'.")
+        return
+    if connection_state["status"] != "idle":
+        await aprint("⚠️  You are already in a pending connection request. Use /deny to cancel it or /accept if it's incoming.\n Hint: Use /pending to check your current connection state.")
+        return
+    
+    # Simulate sending a connection request
+    connection_state["status"] = "waiting"
+    connection_state["target"] = target_username
+    connection_state["direction"] = "outgoing"
+
+    await aprint(f"📡 Connection request sent to @{target_username}. Waiting for them to /accept or /deny...")
+    # (Server interaction would go here, e.g., sending a control message to the server)
+
+async def cmd_accept(_: str):
+    """ Accept a pending incoming connection request """
+    if connection_state["status"] != "requested" or connection_state["direction"] != "incoming":
+        await aprint("❌  No incoming connection request to accept. Use /connect to initiate a new one.")
+        return
+    
+    target_username = connection_state["target"]
+    await aprint(f"✅  Connection request with @{target_username} accepted. 🔐  Handshake to be initiated...")
+
+    # Simulate entering secure tunnel (add handshake Logic later)
+    connection_state["status"] = "idle"
+    connection_state["target"] = None
+    connection_state["direction"] = None
+
+async def cmd_deny(_: str):
+    """ Deny a pending incoming/outgoing connection """
+    if connection_state["status"] not in ("waiting", "requested"):
+        await aprint("❌ No connection request to deny or cancel.")
+        return
+
+    who = connection_state["target"]
+    if connection_state["direction"] == "incoming":
+        await aprint(f"🚫  You denied the connection request from @{who}.")
+    else:
+        await aprint(f"🚫  You cancelled the connection request to @{who}.")
+    
+    # Reset connection state
+    connection_state["status"] = "idle"
+    connection_state["target"] = None
+    connection_state["direction"] = None
+
+async def cmd_pending(_: str):
+    """ Check the current connection state """
+    if connection_state["status"] == "idle":
+        await aprint("No pending connections.")
+    else:
+        status = connection_state["status"]
+        target = connection_state["target"]
+        direction = connection_state["direction"]
+        await aprint(f"Current connection status: {status}, Target: @{target}, Direction: {direction}")
+
+# Registering the connect, accept, and deny commands
+command_handler.register_command("/connect", cmd_connect)
+command_handler.register_command("/accept", cmd_accept)
+command_handler.register_command("/deny", cmd_deny)
+command_handler.register_command("/pending", cmd_pending)
+
+
 async def send_messages(websocket: websockets.ClientConnection, username: str):
     """ 
     Handles sending messages through the websocket.
@@ -222,6 +306,9 @@ async def main(username: str | None = None):
     
     # Connect to the websocket server via async context manager
     async with websockets.connect(SERVER_URI) as websocket:
+        # Send the username to the server
+        encoded_username = encode_message(message=username, sender=username)
+
         logger.info(f"Connected to secure chat websocket server at ws://localhost:8765 as '{username}'")
         send_task = asyncio.create_task(send_messages(websocket, username))
         receive_task = asyncio.create_task(receive_messages(websocket))
