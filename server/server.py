@@ -1,31 +1,219 @@
 import asyncio
 import websockets
-from shared.protocol import encode_message, decode_message
+import websockets.legacy.server
+import logging
+from shared import encode_message, decode_message, make_register_message, make_connect_request, make_connect_response, make_user_disconnected_message, make_system_notification
+from shared import BANNER
+# Logging configuration and setup
+# This will log messages to the console with a specific format
+# You can change the logging level
+logging.basicConfig(
+    level=logging.INFO, 
+    format='%(asctime)s - [%(levelname)s] - %(message)s',
+    datefmt='%Y-%m-%d %H:%M:%S'
+)
 
-connected_clients = set()
+# Create a logger for this module
+# This allows us to log messages specific to this module
+logger = logging.getLogger(__name__)
+
+# This will hold all connected clients' websockets
+# The keys are usernames and the values are the respective websocket connections
+# This allows us to keep track of connected users and their respective websockets
+user_registry_by_id: dict[str, websockets.legacy.server.WebSocketServerProtocol] = {}
+
+# This will hold the mapping of websockets to usernames
+# This allows us to quickly find the username associated with a given websocket connection
+user_registry_by_websocket: dict[websockets.legacy.server.WebSocketServerProtocol, str] = {}
+
+def is_valid_username_format(username: str) -> tuple[bool, str]:
+    """Validates the format of the username and returns a tuple of (is_valid, reason)"""
+    reserved_keywords = {
+        "None", "True", "False", "and", "or", "not", "if", "else", "elif", "while", "for", "in", "def", "class", "import", "from", "as", "return", "break", "continue"
+    }
+
+    if not username:
+        return False, "Username is required."
+    if not isinstance(username, str):
+        return False, "Username is not a string."
+    if not username.islower():
+        return False, "Username must only contain lowercase alphabetical characters and/or numerical characters."
+    if not username[0].isalpha():
+        return False, "Username must start with a letter."
+    if not username.isalnum() or not username.isalpha():
+        return False, "Username must be either alphabetic or alphanumeric."
+    if len(username) > 50:
+        return False, "Username must be no longer than 50 characters."
+    if username in reserved_keywords:
+        return False, "Username is a reserved keyword."
+    if username == "server":
+        return False, "Username 'server' is not for you bro 😤"
+    return True, ""
+
+async def handle_registration(websocket) -> str | None:
+    TIMEOUT = 10
+    MAX_ATTEMPTS = 4
+    attempts = 0
+    start_time = asyncio.get_event_loop().time()
+
+    while True:
+        time_left = TIMEOUT - (asyncio.get_event_loop().time() - start_time)
+        if time_left <=0:
+            await websocket.send(encode_message(
+                type="register_error",
+                sender="Server",
+                message="⏰ Time expired bruh! You didn't register in time. Connection will be closed.\n Try again sooner this time 👍"
+            ))
+            await websocket.close()
+            return None
+        
+        try:
+            message = await asyncio.wait_for(websocket.recv(), timeout=time_left)
+            decoded = decode_message(message)
+            if decoded.get("type") != "register" or "username" not in decoded or not decoded.get("username"):
+                await websocket.send(encode_message(
+                    type="register_error",
+                    sender="Server",
+                    message="❌ Invalid registration format. Must send a 'register' message with 'username'."
+                ))
+                attempts += 1
+            else:
+                username = decoded["username"].strip()
+                is_valid, reason = is_valid_username_format(username=username)
+                if not is_valid:
+                    attempts += 1
+                    if attempts >= MAX_ATTEMPTS:
+                        await websocket.send(encode_message(
+                            type="register_error",
+                            sender="Server",
+                            message=f"❌ Invalid username: {reason}\n⚠️ Maximum attempts reached. Disconnecting."
+                        ))
+                        await websocket.close()
+                        return None
+                    await websocket.send(encode_message(
+                        type="register_error",
+                        sender="Server",
+                        message=f"❌ Invalid username: {reason}\n🔁 Attempts remaining: {MAX_ATTEMPTS - attempts}"
+                    ))
+                elif username in user_registry_by_id:
+                    await websocket.send(encode_message(
+                        type="register_error",
+                        sender="Server",
+                        message=f"⚠️ Username '{username}' is already taken. Try another.\n⌛ Time left: {int(time_left)}s"
+                    ))
+                else:
+                    return username # ✅ Success
+        except asyncio.TimeoutError:
+            await websocket.send(encode_message(
+                type="register_error",
+                sender="Server",
+                message="🥚 Timeout waiting for username. Connection closing."
+            ))
+            await websocket.close()
+            return None
+        except Exception as e:
+            logger.exception(f"Error during registration: {e}")
+            await websocket.send(encode_message(
+                type="register_error",
+                sender="Server",
+                message="❌ Unexpected error occurred. Try again later."
+            ))
+            await websocket.close()
+            return None
 
 async def handler(websocket):
-    connected_clients.add(websocket)
-    print(f"Connected Clients: {connected_clients}")
+    """Handles incoming websocket connections and registration of users."""
+
     try:
-        async for message in websocket:
-            print(f"{websocket} has send {message}")
+        # Receive the initial (register) message from the client
+        # This is expected to be a registration message containing the username
+        logger.info("[handler] Starting registration phase...")
+        username = await handle_registration(websocket=websocket)
+        
+        if username is None:
+            logger.info("[handler] Registration failed or timed out")
+            return
+
+        # Register the user in the user registry
+        logger.info(f"[handler] Registering user '{username}' with websocket {websocket}")
+
+        # Store the websocket connection in the user registry
+        # This allows us to keep track of connected users and their respective websockets
+        user_registry_by_id[username] = websocket
+
+        # Store the username in the user registry by websocket
+        # This allows us to quickly find the username associated with a given websocket connection
+        user_registry_by_websocket[websocket] = username
+
+        # Log the registration
+        logger.info(f"[handler] [+] User '{username}' has been registered with {websocket}")
+        
+        # Send a welcome message back to the client
+        welcome_message = encode_message(type="register_success", message=f"✅ Welcome {username}!", sender="Server")
+        await websocket.send(welcome_message)
+    
+    except websockets.exceptions.ConnectionClosedOK:
+        logger.warning("[handler] [!] Connection closed from client while registration")
+        return
+
+    except Exception as e:
+        # If any error occurs during the registration process, log the error and close the connection
+        logger.error(f"[handler] [!] Error during registration: {e}")
+        error_message = encode_message(message="An error occurred during registration. Please try again later.", sender="Server")
+        await websocket.send(error_message)
+        await websocket.close()
+        return
+
+    try:
+
+        async for message in websocket:            
             # Broadcast the message to all connected clients
-            for client in connected_clients:
-                if client != websocket:
-                    await client.send(message)
-    except websockets.exceptions.ConnectionClosedError:
-        print(f"this is for connection closed error, check if any clients are affected: {connected_clients }")
+            logger.info(f"[handler] Received message from {user_registry_by_websocket.get(websocket)}: {message}")
+            
+            for target_username, client_ws in user_registry_by_id.items():
+                if client_ws != websocket:
+                    await client_ws.send(message)   
+    
+    except (websockets.exceptions.ConnectionClosedError, websockets.exceptions.ConnectionClosedOK) as e:
+        # Handle the case where the connection is closed unexpectedly
+        logger.error(f"[handler] [!] Connection closed unexpectedly for user '{user_registry_by_websocket.get(websocket)}'. Error: {e}")
+
     finally:
-        connected_clients.remove(websocket)
+        # find which user is disconnecting
+        username = user_registry_by_websocket.get(websocket)
+
+        # Remove the user from the user registry
+        if username in user_registry_by_id:
+            del user_registry_by_id[username]
+            del user_registry_by_websocket[websocket]
+            logger.info(f"[handler] [-] User '{username}' has been removed from the registry.")
+        
+        # Notify all connected clients about the disconnection
+        disconnect_message = make_user_disconnected_message(username=username) # type: ignore
+        logger.info(f"[handler] [!] User '{username}' has disconnected. Sending disconnection message to all clients.")
+        print('user_registry_update: ', user_registry_by_id)      
+        
+        # Send the disconnection message to all connected clients
+        # This informs all other clients that the user has disconnected        
+        for client_ws in user_registry_by_id.values():
+            
+            try:
+                await client_ws.send(disconnect_message)
+            
+            except websockets.exceptions.ConnectionClosedError:
+                # If the client is already disconnected, we can ignore this error
+                logger.info(f"[handler] [!] Client {client_ws} is already disconnected.")
+
 
 async def main():
+    # welcome banner
+    print('server\n', BANNER)
     async with websockets.serve(handler, "0.0.0.0", 8765):
-        print("Secure chat websocker server is running on ws://0.0.0.0:8765")
+
         await asyncio.Future() # Run Forever
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        print("Keyboard interrupt detected. Server is now [shut down]")
+        pass

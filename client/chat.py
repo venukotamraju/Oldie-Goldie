@@ -1,11 +1,11 @@
 import asyncio
 import websockets
 import logging
-from shared.protocol import encode_message, decode_message
+from shared import encode_message, decode_message, make_register_message, BANNER
 
 # Importing the CommandHandler class from shared.command_handler module
 # This class is responsible for managing commands and their execution in the chat client.
-from shared.command_handler import CommandHandler
+from shared import CommandHandler
 
 # Importing the async input utility function and async print utility function
 # These functions are used to handle asynchronous input and output in the chat client.
@@ -19,6 +19,9 @@ ainput = get_async_input()
 # This utility function is used to handle asynchronous output without blocking the event loop.
 aprint = get_async_print()
 
+# Importing the command handler for managing commands
+command_handler = CommandHandler()
+
 # === Configuration === #
 SERVER_URI = "ws://localhost:8765"
 
@@ -29,27 +32,6 @@ logging.basicConfig(
     )
 logger = logging.getLogger(__name__)
 # ===================== #
-
-# Importing the command handler for managing commands
-command_handler = CommandHandler()
-
-
-
-# Helper method for confirming exit
-# Async input for confirmation (still works fine with ainput)
-async def confirm_exit() -> bool:
-    """ Prompt the user to confirm if they really want to exit """
-
-    while True:
-        response = await ainput("\n Confirm your will to exit (y/n) ")
-        response = response.strip().lower()
-        if response == "y":
-            return True
-        elif response == "n":
-            logger.info(msg="[confirm_exit] Resuming chat. User decided not to exit.")
-            return False
-        else:
-            logger.warning("You have to enter something [y/n]. come on -_-")
 
 async def safe_input(prompt: str = "> ") -> str:
     """ Safe input wrapper with exception handling for keyboard interrupts and EOF errors as well as natively async input handling so to not block the event loop which happens when we use conventional input which is blocking in nature. (eliminates the need for spawning threads)\n
@@ -72,6 +54,23 @@ async def safe_input(prompt: str = "> ") -> str:
     except (KeyboardInterrupt, EOFError):
         logger.warning(" [safe_input] keyboard interrupt or EOF detected")
         raise KeyboardInterrupt("Input interrupted by user or EOF detected. Exiting input loop.")
+
+# Helper method for confirming exit
+# Async input for confirmation (still works fine with ainput)
+async def confirm_exit() -> bool:
+    """ Prompt the user to confirm if they really want to exit """
+
+    while True:
+        response = await safe_input("\n Confirm your will to exit (y/n) ")
+        response = response.strip().lower()
+        if response == "y":
+            return True
+        elif response == "n":
+            logger.info(msg="[confirm_exit] Resuming chat. User decided not to exit.")
+            return False
+        else:
+            logger.warning("You have to enter something [y/n]. come on -_-")
+
 
 # Registering commands with the command handler
 # This allows the chat client to recognize and execute commands like /help, /exit, etc
@@ -105,7 +104,7 @@ command_handler.register_command("/help", cmd_help)
 # 💬Connection State Logic   #
 # ========================== #
 
-# This section handles the connection state logic for the chat client.
+# This section handles the connection state logic and respective command methods for the chat client.
 
 connection_state = {
     "status": "idle",   # idle, waiting, requested
@@ -287,31 +286,137 @@ async def receive_messages(websocket):
             logger.info("[receive_messages] Task received cancellation signal.")
             raise
 
+# Utility function to ask for the username
+async def ask_for_username() -> str:
+    """ 
+    Asks the user for their username until a non-empty value is provided.
+    
+    This function is used to ensure that the user provides a valid username before connecting to the server.
+    It will keep prompting the user until they enter a non-empty username.
+    """
+    logger.info("[ask_for_username] Prompting user for a username.")
+
+    # Loop until a valid username is provided
+    # This will keep asking the user for a username until they provide a valid one
+    while True:
+        username = await safe_input("\n Enter your username: ")
+        if username.strip():
+            return username.strip()
+        else:
+            logger.warning("[ask_for_username] Username cannot be empty. Please try again.")
+
+async def handle_username_registration(websocket) -> str | None:
+    """Handle timed username registration with retries and feedback from the server"""
+    TIMEOUT = 10
+    MAX_ATTEMPTS = 4
+    attempts = 0
+    start_time = asyncio.get_event_loop().time()
+
+    while True:
+        time_left = TIMEOUT - (asyncio.get_event_loop().time() - start_time)
+        if time_left <= 0:
+            await aprint("\n⏰ Time expired! You took too long to register.")
+            return None
+        
+        await aprint(f"\n🔐 Enter your username (Attempts left: {MAX_ATTEMPTS - attempts}, Time left: {int(time_left)}s):")
+        
+        try:
+            username_task = asyncio.create_task(safe_input())
+            timer_task = asyncio.create_task(asyncio.sleep(time_left))
+
+            done, pending = await asyncio.wait(
+                [username_task, timer_task],
+                return_when=asyncio.FIRST_COMPLETED
+            )
+
+            if timer_task in done:
+                username_task.cancel()
+                try:
+                    await username_task
+                except asyncio.CancelledError:
+                    logger.info("[handle_username_registration] 🥚 Time has expired bro!")
+            
+
+            _username = username_task.result().split()
+            username = None
+            if _username:
+                username = _username[0]
+            else:
+                username = ""
+
+            logger.info(msg=f"[handle_username_registration] username from task result: {username}")
+            
+            if not username:
+                await aprint("❗Username cannot be empty. Try better bro...😑")
+                continue
+
+            await websocket.send(make_register_message(username=username)) #type: ignore
+
+            # Wait for the server response with remaining time
+            remaining = TIMEOUT - (asyncio.get_event_loop().time() - start_time)
+            if remaining <= 0:
+                await aprint("\n⏰ Time expired waiting for server response")
+                return None
+
+            response = await asyncio.wait_for(websocket.recv(), timeout=time_left)
+            decoded = decode_message(response)
+
+            if decoded["type"] == "user_disconnected":
+                logger.info(f"User @{decoded['username']} has disconnected.")
+
+                # Optionally: clear connection_state if this was our peer
+                if connection_state["target"] == decoded["username"]:
+                    connection_state["status"] = "idle"
+                    connection_state["target"] = None
+                    connection_state["direction"] = None
+                continue
+
+            if decoded["type"] == "register_success":
+                await aprint(f"{decoded['message']}")
+                return username #type: ignore
+
+            elif decoded["type"] == "register_error":
+                await aprint(f"{decoded['message']}")
+
+                # Only increment attempts for format errors
+                if "Invalid username" in decoded["message"]:
+                    attempts += 1
+                if attempts >= MAX_ATTEMPTS:
+                    await aprint("⚠️ Maximum attempts reached. Exiting.")
+                    return None
+
+        except asyncio.CancelledError:
+            return None
+        except asyncio.TimeoutError:
+            await aprint("\n🥚 Timeout waiting for server response.")
+            return None
+        except Exception as e:
+            await aprint(f"\n Unexpected error: {e}")
+            return None
+
 async def main(username: str | None = None):
     """ Main event loop handling input/output task coordination and handle the following tasks:
     1. send_messages
     2. receive_messages
     """
-
-    if username == None:
-
-        # Get the username until the user enters a non-empty value
-        while True:
-            username = await ainput("\n Enter your username: ")
-            if username:
-                username = username.strip()
-                break
-            if not username:
-                logger.warning("[main] Username cannot be empty... come on bro! :/")
+    # Welcome banner
+    await aprint("client\n",BANNER)
     
     # Connect to the websocket server via async context manager
     async with websockets.connect(SERVER_URI) as websocket:
-        # Send the username to the server
-        encoded_username = encode_message(message=username, sender=username)
+        
+        # Log the connection to the server
+        logger.info(f"Connected to secure chat websocket server at ws://localhost:8765 as '{username}', Beginning username registration...")
 
-        logger.info(f"Connected to secure chat websocket server at ws://localhost:8765 as '{username}'")
-        send_task = asyncio.create_task(send_messages(websocket, username))
-        receive_task = asyncio.create_task(receive_messages(websocket))
+        username = await handle_username_registration(websocket=websocket)
+        
+        if username is None:
+            logger.warning("[main] Username registration failed or cancelled.")
+            raise asyncio.CancelledError # Gracefully exit
+        
+        # Now continue as before
+        send_task = asyncio.create_task(send_messages(websocket=websocket, username=username))
+        receive_task = asyncio.create_task(receive_messages(websocket=websocket))
 
         try:
 

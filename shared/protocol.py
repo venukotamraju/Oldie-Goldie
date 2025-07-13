@@ -20,7 +20,7 @@ PROTOCOL_VERSION = "1.0"
 
 # Function to encode a chat message
 # Takes a sender, message, and an optional timestamp
-def encode_message(sender: str, message: str, timestamp = None ) -> str:
+def encode_message(sender: str, message: str, timestamp = None, type: str = 'chat_message' ) -> str:
     """Encodes a chat message into a JSON string."""
     
     # Validate inputs
@@ -39,10 +39,11 @@ def encode_message(sender: str, message: str, timestamp = None ) -> str:
     # with timezone information
     if timestamp is None:
         timestamp = datetime.now().astimezone().isoformat()
+    
     return json.dumps(
         {
             "protocol_version": PROTOCOL_VERSION,
-            "type": "chat_message",
+            "type": type,
             "sender": sender,
             "message": message,
             "timestamp": timestamp
@@ -106,7 +107,9 @@ def make_user_disconnected_message(username: str) -> str:
     return json.dumps({
         "protocol_version": PROTOCOL_VERSION,
         "type": "user_disconnected",
+        "sender": "Server",
         "username": username,
+        "message": f"{username} has disconnected.",
         "timestamp": datetime.now().astimezone().isoformat()
     })
 
