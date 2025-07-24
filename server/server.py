@@ -40,7 +40,7 @@ def is_valid_username_format(username: str) -> tuple[bool, str]:
         return False, "Username must only contain lowercase alphabetical characters and/or numerical characters."
     if not username[0].isalpha():
         return False, "Username must start with a letter."
-    if not username.isalnum() or not username.isalpha():
+    if not username.isalnum():
         return False, "Username must be either alphabetic or alphanumeric."
     if len(username) > 50:
         return False, "Username must be no longer than 50 characters."
@@ -111,6 +111,9 @@ async def handle_registration(websocket) -> str | None:
             ))
             await websocket.close()
             return None
+        except websockets.exceptions.ConnectionClosedOK:
+            logger.info("[handle_registration] Registration cancelled from user's side")
+            return None
         except Exception as e:
             logger.exception(f"Error during registration: {e}")
             await websocket.send(encode_message(
@@ -120,6 +123,23 @@ async def handle_registration(websocket) -> str | None:
             ))
             await websocket.close()
             return None
+
+
+async def broadcast(websocket:websockets.legacy.server.WebSocketServerProtocol, user_reg_id:dict[str, websockets.legacy.server.WebSocketServerProtocol], user_reg_web:dict[websockets.legacy.server.WebSocketServerProtocol, str]) -> None:
+    try:
+        async for message in websocket:            
+            # Broadcast the message to all connected clients
+            broadcast_to = list(user_reg_web.values())
+            broadcast_to.remove(user_reg_web[websocket])
+            logger.info(f"[broadcast] Received message from {user_reg_web.get(websocket)}. Broadcasting to these users:\n[{broadcast_to}]")
+            
+            for client_ws in user_reg_id.values():
+                if client_ws != websocket:
+                    await client_ws.send(message)
+        return None
+    except websockets.exceptions.ConnectionClosed:
+        pass
+
 
 async def handler(websocket):
     """Handles incoming websocket connections and registration of users."""
@@ -148,9 +168,9 @@ async def handler(websocket):
         # Log the registration
         logger.info(f"[handler] [+] User '{username}' has been registered with {websocket}")
         
-        # Send a welcome message back to the client
-        welcome_message = encode_message(type="register_success", message=f"✅ Welcome {username}!", sender="Server")
-        await websocket.send(welcome_message)
+        # Send a confirmation message back to the client
+        confirmation_message = make_register_message(username=username)
+        await websocket.send(confirmation_message)
     
     except websockets.exceptions.ConnectionClosedOK:
         logger.warning("[handler] [!] Connection closed from client while registration")
@@ -166,13 +186,11 @@ async def handler(websocket):
 
     try:
 
-        async for message in websocket:            
-            # Broadcast the message to all connected clients
-            logger.info(f"[handler] Received message from {user_registry_by_websocket.get(websocket)}: {message}")
-            
-            for target_username, client_ws in user_registry_by_id.items():
-                if client_ws != websocket:
-                    await client_ws.send(message)   
+        await broadcast(
+            websocket=websocket,
+            user_reg_id=user_registry_by_id,
+            user_reg_web=user_registry_by_websocket
+        )  
     
     except (websockets.exceptions.ConnectionClosedError, websockets.exceptions.ConnectionClosedOK) as e:
         # Handle the case where the connection is closed unexpectedly
@@ -216,4 +234,4 @@ if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        pass
+        logger.warning("[__main__] KeyboardInterrupt received. Server shutting down.")

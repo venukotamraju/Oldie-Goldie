@@ -1,4 +1,6 @@
 import asyncio
+from types import CoroutineType
+from typing import Any
 import websockets
 import logging
 from shared import encode_message, decode_message, make_register_message, BANNER
@@ -52,8 +54,8 @@ async def safe_input(prompt: str = "> ") -> str:
         return await ainput(prompt)
     
     except (KeyboardInterrupt, EOFError):
-        logger.warning(" [safe_input] keyboard interrupt or EOF detected")
-        raise KeyboardInterrupt("Input interrupted by user or EOF detected. Exiting input loop.")
+        logger.warning("[safe_input] keyboard interrupt or EOF detected")
+        raise KeyboardInterrupt
 
 # Helper method for confirming exit
 # Async input for confirmation (still works fine with ainput)
@@ -305,13 +307,26 @@ async def ask_for_username() -> str:
         else:
             logger.warning("[ask_for_username] Username cannot be empty. Please try again.")
 
+    
+
 async def handle_username_registration(websocket) -> str | None:
     """Handle timed username registration with retries and feedback from the server"""
     TIMEOUT = 10
     MAX_ATTEMPTS = 4
+    INTERRUPT_SENTINEL = "<INTERRUPTED>"
     attempts = 0
     start_time = asyncio.get_event_loop().time()
 
+    async def safe_username_input() -> str | None:
+        """ A exception handling wrapper for safe input used only for handle_username_registration as there is traceback occurring with KeyboardInterrupt when safe_input is declared as a task to prompt for username """
+        try:
+            return await safe_input()
+        except KeyboardInterrupt:
+            logger.info("[handle_username_registration] Suppressed KeyboardInterrupt *inside* safe_username_input.")
+            
+            # Return a Sentinel Value (object or str)
+            return INTERRUPT_SENTINEL
+    
     while True:
         time_left = TIMEOUT - (asyncio.get_event_loop().time() - start_time)
         if time_left <= 0:
@@ -321,33 +336,33 @@ async def handle_username_registration(websocket) -> str | None:
         await aprint(f"\n🔐 Enter your username (Attempts left: {MAX_ATTEMPTS - attempts}, Time left: {int(time_left)}s):")
         
         try:
-            username_task = asyncio.create_task(safe_input())
+            username_task = asyncio.create_task(safe_username_input())
             timer_task = asyncio.create_task(asyncio.sleep(time_left))
-
-            done, pending = await asyncio.wait(
+            
+           
+            done, _ = await asyncio.wait(
                 [username_task, timer_task],
                 return_when=asyncio.FIRST_COMPLETED
             )
 
             if timer_task in done:
                 username_task.cancel()
-                try:
-                    await username_task
-                except asyncio.CancelledError:
-                    logger.info("[handle_username_registration] 🥚 Time has expired bro!")
+                await asyncio.gather(username_task, return_exceptions=True)                
+                logger.warning("[handle_username_registration] Time expired waiting for input")
+                return None
             
-
-            _username = username_task.result().split()
-            username = None
-            if _username:
-                username = _username[0]
-            else:
-                username = ""
+            username_input = await username_task
+           
+            if username_input == INTERRUPT_SENTINEL:
+                logger.info("[handle_username_registration] KeyboardInterrupt detected from input task. Exiting registration.")
+                return None
+            
+            username = (username_input or "").split()[0] if username_input else ""
 
             logger.info(msg=f"[handle_username_registration] username from task result: {username}")
             
             if not username:
-                await aprint("❗Username cannot be empty. Try better bro...😑")
+                logger.warning("❗Username cannot be empty. Try better bro...😑")
                 continue
 
             await websocket.send(make_register_message(username=username)) #type: ignore
@@ -371,8 +386,8 @@ async def handle_username_registration(websocket) -> str | None:
                     connection_state["direction"] = None
                 continue
 
-            if decoded["type"] == "register_success":
-                await aprint(f"{decoded['message']}")
+            if decoded["type"] == "register":
+                logger.info(f"[handle_username_registration] Received confirmation from the server. Welcome `{username}`!")
                 return username #type: ignore
 
             elif decoded["type"] == "register_error":
@@ -388,13 +403,16 @@ async def handle_username_registration(websocket) -> str | None:
         except asyncio.CancelledError:
             return None
         except asyncio.TimeoutError:
-            await aprint("\n🥚 Timeout waiting for server response.")
+            logger.info("\n🥚 Timeout waiting for server response.")
+            return None
+        except (KeyboardInterrupt, EOFError):
+            logger.info("\n Username Registration Cancelled via Keyboard Interrupt")
             return None
         except Exception as e:
-            await aprint(f"\n Unexpected error: {e}")
+            logger.error(f"\n Unexpected error: {e}")
             return None
 
-async def main(username: str | None = None):
+async def main():
     """ Main event loop handling input/output task coordination and handle the following tasks:
     1. send_messages
     2. receive_messages
@@ -406,7 +424,7 @@ async def main(username: str | None = None):
     async with websockets.connect(SERVER_URI) as websocket:
         
         # Log the connection to the server
-        logger.info(f"Connected to secure chat websocket server at ws://localhost:8765 as '{username}', Beginning username registration...")
+        logger.info("Connected to secure chat websocket server at ws://localhost:8765, Beginning username registration...")
 
         username = await handle_username_registration(websocket=websocket)
         
@@ -459,7 +477,7 @@ if __name__ == "__main__":
     
     try:
         asyncio.run(main())
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, EOFError):
         logger.warning("[root] Keyboard interrupt detected. Client shutting down :(")
     except ConnectionRefusedError:
         logger.error("[root] Connection refused - server may be offline :(")
