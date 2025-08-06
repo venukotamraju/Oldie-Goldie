@@ -20,8 +20,8 @@ PROTOCOL_VERSION = "1.0"
 
 # Function to encode a chat message
 # Takes a sender, message, and an optional timestamp
-def encode_message(sender: str, message: str, timestamp = None, type: str = 'chat_message' ) -> str:
-    """Encodes a chat message into a JSON string."""
+def encode_message(sender: str, message: str, timestamp = None, type: str = 'chat_message', **kwargs) -> str:
+    """Encodes a chat message into a JSON string with support for extra fields."""
     
     # Validate inputs
     if not sender or not message:
@@ -40,15 +40,19 @@ def encode_message(sender: str, message: str, timestamp = None, type: str = 'cha
     if timestamp is None:
         timestamp = datetime.now().astimezone().isoformat()
     
-    return json.dumps(
-        {
+    # Construct base message
+    message_dict = {
             "protocol_version": PROTOCOL_VERSION,
             "type": type,
             "sender": sender,
             "message": message,
             "timestamp": timestamp
         }
-    )
+    
+    # Add any additional fields
+    message_dict.update(kwargs)
+
+    return json.dumps(message_dict)
 
 # Function to decode a chat message
 # Takes a JSON string and returns a dictionary

@@ -26,6 +26,12 @@ user_registry_by_id: dict[str, websockets.legacy.server.WebSocketServerProtocol]
 # This allows us to quickly find the username associated with a given websocket connection
 user_registry_by_websocket: dict[websockets.legacy.server.WebSocketServerProtocol, str] = {}
 
+# Blocked usernames set (non-persistent)
+blocked_usernames: set[str] = set()
+
+# Pending tunnel validation states
+pending_validations: dict[tuple[str, str], dict] = {}
+
 def is_valid_username_format(username: str) -> tuple[bool, str]:
     """Validates the format of the username and returns a tuple of (is_valid, reason)"""
     reserved_keywords = {
@@ -101,6 +107,12 @@ async def handle_registration(websocket) -> str | None:
                         sender="Server",
                         message=f"⚠️ Username '{username}' is already taken. Try another.\n⌛ Time left: {int(time_left)}s"
                     ))
+                elif username in blocked_usernames:
+                    await websocket.send(encode_message(
+                        type="register_error",
+                        sender="Server",
+                        message=f"⛔ Username '{username}' has been blocked. Restart required with a new identity."
+                    ))
                 else:
                     return username # ✅ Success
         except asyncio.TimeoutError:
@@ -127,16 +139,182 @@ async def handle_registration(websocket) -> str | None:
 
 async def broadcast(websocket:websockets.legacy.server.WebSocketServerProtocol, user_reg_id:dict[str, websockets.legacy.server.WebSocketServerProtocol], user_reg_web:dict[websockets.legacy.server.WebSocketServerProtocol, str]) -> None:
     try:
-        async for message in websocket:            
-            # Broadcast the message to all connected clients
-            broadcast_to = list(user_reg_web.values())
-            broadcast_to.remove(user_reg_web[websocket])
-            logger.info(f"[broadcast] Received message from {user_reg_web.get(websocket)}. Broadcasting to these users:\n[{broadcast_to}]")
+        async for message in websocket:
+
+            # Establishing peer connection
+            decoded = decode_message(message_str=message) #type: ignore
+
+            #### Connection Request Handling ####
+            # check if it's a connect request
+            if decoded.get("type") == "connect_request":
+                
+                source_user = user_reg_web.get(websocket)
+                target_user = decoded.get("target")
+
+                logger.info(f"[broadcast] received `connect_request` from @{source_user} to @{target_user} ")
+                
+                # checking if target's connected
+                if not source_user or not target_user or target_user not in user_reg_id:
+                    await websocket.send(
+                        encode_message(
+                            type="connect_error",
+                            sender="Server",
+                            message=f"Could not find user '{target_user}' to connect."
+                        )
+                    )
+
+                # Forward the request to the target user
+                else:
+                    await user_reg_id[target_user].send(
+                        encode_message(
+                            type="connect_request",
+                            sender=source_user,
+                            message=f"Connection request from @{source_user}. Use /accept or /deny."
+                        )
+                    )
+                
+            #### Connect Busy ####
+            # If peer already has a `connect_request`
+            if decoded.get("type") == 'connect_busy':
+                requester = decoded['target'] # The one who initiated the request
+                responder = user_reg_web[websocket]
+
+                logger.info(f"[broadcast] (server) Connection request from @{requester} to @{responder} denied by server. @{responder} is not idle, they either have pending connection requests or is in a private tunnel.")
+
+                await user_reg_id[requester].send(
+                    encode_message(
+                        type='connect_busy',
+                        sender=responder,
+                        message=f"(server) Connection request to @{responder} denied. They may either have \n- pending connection requests or \n- could be in a private tunnel.\n"
+                    )
+                )
+
+            #### Connect Accept ####
+            if decoded.get("type") == "connect_accept":
+                responder = user_reg_web[websocket]
+                requester = decoded["target"] # The user who initiated request
+
+                if requester not in user_reg_id:
+                    await websocket.send(encode_message(
+                        type="connect_error",
+                        sender="Server",
+                        message=f"Requester @{requester} not found."
+                    ))
+                
+                await user_reg_id[requester].send(
+                    encode_message(
+                        type="connect_accept",
+                        sender=responder,
+                        message=f"@{responder} accepted your connection. Tunnel validation will start."
+                    )
+                )
+                
+                logger.info(f"[broadcast] connect_accept: (responder) @{responder} <-> (requester) @{requester}.")
+                               
+                # Accepting connection - trigger tunnel validation
+                await user_reg_id[requester].send(
+                    encode_message(
+                        type="tunnel_validate",
+                        sender="Server",
+                        message="Enter the pre-shared secret to validate the tunnel (within 10 seconds)"
+                    )
+                )
+                await user_reg_id[responder].send(encode_message(
+                    type="tunnel_validate",
+                    sender="Server",
+                    message="Enter the pre-shared secret to validate the tunnel (within 10 seconds)"
+                ))
+
+                # Save validation state
+                pending_validations[(requester, responder)] = {
+                    "websockets": (user_reg_id[requester], user_reg_id[responder]),
+                    "secrets": {},
+                    "deadline": asyncio.get_event_loop().time() + 10
+                }
             
-            for client_ws in user_reg_id.values():
-                if client_ws != websocket:
-                    await client_ws.send(message)
-        return None
+            #### Connection Deny ####
+            if decoded.get("type") == "connect_deny":
+                responder = user_reg_web[websocket]
+                requester= decoded.get("target")
+
+                logger.info(f"[broadcast] received `connect_deny` from {responder} for {requester}")
+
+                if requester in user_reg_id:
+                    await user_reg_id[requester].send(
+                        encode_message(
+                            type="connect_deny",
+                            sender=responder,
+                            message=f"@{responder} denied your connection request."
+                        )
+                    )
+                    logger.info(f"[server] connect_deny: @{responder} rejected @{requester}")
+            
+            #### Tunnel Secret Submission ####
+            # Now when a user submits their secret
+            if decoded.get("type") == "tunnel_secret":
+                sender = user_reg_web.get(websocket)
+                secret = decoded.get("secret")
+
+                logger.info(f"[broadcast.tunnel_secret] sender: @{sender}, secret: @{secret}")
+
+                # Find the pending valdation involving this sender
+                for (a, b), val_data in list(pending_validations.items()):
+                    if sender in (a, b):
+                        val_data["secrets"][sender] = secret
+
+                        logger.info(f"[broadcast.tunnel_secret] Tunnel Secrets now: {pending_validations}")
+                        
+                        # check if both responded
+                        if len(val_data["secrets"]) == 2:
+                            s1, s2 = val_data["secrets"].values()
+                            ws1, ws2 = val_data["websockets"]
+                            
+                            logger.info(f"[broadcast.tunnel_secret] Both have entered secrets.\n{(a, b)}: {val_data['secrets']} ")
+
+                            if s1 == s2:
+                                # Success
+                                await ws1.send(encode_message(
+                                    type="tunnel_established",
+                                    sender="Server",
+                                    message="Tunnel successfully established!"
+                                ))
+                                await ws2.send(encode_message(
+                                    type="tunnel_established",
+                                    sender="Server",
+                                    message="Tunnel successfully established!"
+                                ))
+                            else:
+                                # Failure
+                                for u in (a, b):
+                                    blocked_usernames.add(u)
+                                await ws1.send(encode_message(
+                                    type="tunnel_failed",
+                                    sender="Server",
+                                    message="Validation failed. This username is now blocked."
+                                ))
+                                await ws2.send(encode_message(
+                                    type="tunnel_failed",
+                                    sender="Server",
+                                    message="Validation failed. This username is now blocked."
+                                ))
+                                await ws1.close()
+                                await ws2.close()
+
+                            del pending_validations[(a, b)]
+                            
+            # Normal broadcast (only for idle chat)
+            if decoded["type"] == 'chat_message':
+                broadcast_to = list(user_reg_web.values())
+                current_user = user_reg_web.get(websocket)
+                if current_user in broadcast_to:
+                    broadcast_to.remove(current_user)
+
+                logger.info(f"[broadcast] Received message from: {user_reg_web.get(websocket)}\nDecoded message: {decode_message(str(message))}\nBroadcasting to these users: {broadcast_to}")
+                
+                for client_ws in user_reg_id.values():
+                    if client_ws != websocket:
+                        await client_ws.send(message)
+
     except websockets.exceptions.ConnectionClosed:
         pass
 
@@ -213,21 +391,42 @@ async def handler(websocket):
         
         # Send the disconnection message to all connected clients
         # This informs all other clients that the user has disconnected        
-        for client_ws in user_registry_by_id.values():
+        for client_ws in list(user_registry_by_id.values()): # ignore the list warning as we are trying to protect against concurrent overlapping and error due to in-loop dict modification.
             
             try:
                 await client_ws.send(disconnect_message)
             
-            except websockets.exceptions.ConnectionClosedError:
+            except (websockets.exceptions.ConnectionClosedError, websockets.exceptions.ConnectionClosedOK):
                 # If the client is already disconnected, we can ignore this error
                 logger.info(f"[handler] [!] Client {client_ws} is already disconnected.")
 
+# If one user never sends their secret, the pending_validations entry remains forever. We should schedule a timeout cleanup task.
+async def check_tunnel_timeouts():
+    while True:
+        now = asyncio.get_event_loop().time()
+        expired = [pair for pair, data in pending_validations.items() if now > data["deadline"]]
+        for pair in expired:
+            ws1, ws2 = pending_validations[pair]["websockets"]
+            for ws in (ws1, ws2):
+                try:
+                    await ws.send(encode_message(
+                        type="tunnel_failed",
+                        sender="Server",
+                        message="Validation timeout. Usernames are blocked"
+                    ))
+                    await ws.close()
+                except Exception:
+                    pass
+            for u in pair:
+                blocked_usernames.add(u)
+            del pending_validations[pair]
+        await asyncio.sleep(1)
 
 async def main():
     # welcome banner
     print('server\n', BANNER)
+    asyncio.create_task(check_tunnel_timeouts()) # Start background task
     async with websockets.serve(handler, "0.0.0.0", 8765):
-
         await asyncio.Future() # Run Forever
 
 if __name__ == "__main__":

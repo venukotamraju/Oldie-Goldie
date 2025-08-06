@@ -1,0 +1,8 @@
+# Ignore the log files which also include my progress log or any other log dump
+logs/
+
+# Ignore the cache files
+*/__pycache__
+
+# Ignore the tests dir
+tests/
