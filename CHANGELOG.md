@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 _Features and fixes added since `v0.4` milestone._
 
 ### 🚧 Added
+
 - Final feature for tunnel lifecycle (TBD)
 - Improvements to PSK input UX and tunnel error handling
 
@@ -22,6 +23,17 @@ _Features and fixes added since `v0.4` milestone._
 ### 🔧 Changed
 
 ### 🧪 Experimental
+
+---
+
+## [v0.4.1] - 2025-09-19
+
+### 🔗 Added support for `/exit_tunnel`
+
+### 📋 Description
+
+- Users can now use `/exit_tunnel` while in a `tunnel_active` state to exit the tunnel. When the command is used by a user, their state gets reset to default and along with them, the server relays the `tunnel_exit` to the peer, which when recieved triggers a `reset_state` on their side, making them exit the tunnel too successfully.
+
 ---
 
 ## [v0.4] - 2025-08-06
@@ -95,6 +107,6 @@ Implemented an interactive and secure peer-to-peer connection system using pre-s
 
 ---
 
-## [v0.3] - *(No changelog recorded)*
+## [v0.3] - _(No changelog recorded)_
 
 First structured changelog starts from `v0.4`.

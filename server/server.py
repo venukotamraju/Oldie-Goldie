@@ -301,7 +301,35 @@ async def broadcast(websocket:websockets.legacy.server.WebSocketServerProtocol, 
                                 await ws2.close()
 
                             del pending_validations[(a, b)]
-                            
+
+            #### TUNNEL EXIT ####
+            if decoded.get("type") == "tunnel_exit":
+                source_user = user_reg_web.get(websocket)
+                target_user = decoded.get("target")
+
+                logger.info(f"[broadcast] received `tunnel_exit` by {source_user}. Forwarding to {target_user}")
+                
+                # checking if target's connected
+                if not source_user or not target_user or target_user not in user_reg_id:
+                    await websocket.send(
+                        encode_message(
+                            type="connect_error",
+                            sender="Server",
+                            message=f"Could not find user '{target_user}' to connect."
+                        )
+                    )
+                
+                # Forward the `tunnel_exit` notification to the target user
+                else:
+                    await user_reg_id[target_user].send(
+                        encode_message(
+                            type="tunnel_exit",
+                            sender=source_user,
+                            message=f"(server) {source_user} has exited the tunnel"
+                        )
+                    )
+                
+
             # Normal broadcast (only for idle chat)
             if decoded["type"] == 'chat_message':
                 broadcast_to = list(user_reg_web.values())

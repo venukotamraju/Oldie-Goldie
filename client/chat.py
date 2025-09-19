@@ -81,6 +81,14 @@ def set_input_mode(mode: str):
     except Exception as e:
         logger.error(f"[set_input_mode] Failed to interrupt prompt: {e}")
 
+# === Client Global Events Object For Protocol Type === #
+client_event_types = {
+    'TUNNEL_EXIT': "tunnel_exit",
+}
+
+# =========== #
+
+
 # ======================== #
 # Safe Input
 # ======================== #
@@ -257,7 +265,7 @@ def cmd_connect(line: str):
         return
     
     if connection_state["status"] != "idle":
-        logger.warning("[cmd_connect] Already in a connection state. Use /peding or /deny.")
+        logger.warning("[cmd_connect] Already in a connection state. Use /pending or /deny.")
         return
 
     connection_state.update({
@@ -340,6 +348,19 @@ async def cmd_exit_tunnel(_: str):
         logger.info("[cmd_exit_tunnel] No active tunnel.")
         return
     
+    # Notify Server that a peer has exited the tunnel, so that that server would forward the same to the fellow peer, and they too can reset their state.
+    task = asyncio.create_task(
+        active_websocket.send(
+            encode_message(
+                type=client_event_types["TUNNEL_EXIT"],
+                sender=current_username,
+                target=connection_state["target"],
+                message="tunnel_exit"
+            )
+        )
+    )
+    await wait_and_log_task(task, "cmd_exit_tunnel")
+
     logger.info(f"[cmd_exit_tunnel] Tunnel with @{connection_state['target']} closed.")
     await reset_connection_state()
 
@@ -553,7 +574,17 @@ async def receive_messages(websocket: websockets.ClientConnection):
                 logger.info("[receive_messages] Tunnel validation failed. PSK mismatch.")
                 await reset_connection_state()
                 input_mode = "chat"
-                
+
+            # ========================== 
+            # Tunnel Exit Event
+            # ========================== 
+
+            elif msg_type == "tunnel_exit":
+                logger.info(f"[receive_messages] {decoded.get('message')}")
+                await reset_connection_state()
+                input_mode = "chat"
+            
+            
             # ========================== 
             # Disconnection Event
             # ========================== 
@@ -566,7 +597,6 @@ async def receive_messages(websocket: websockets.ClientConnection):
                 
                 if connection_state.get("target") == user:
                     await reset_connection_state()
-                
 
             # ==========================
             # Normal Broadcast/Chat Messages
