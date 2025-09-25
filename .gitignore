@@ -6,3 +6,9 @@ logs/
 
 # Ignore the tests dir
 tests/
+
+# Ignore env
+/*env
+
+# Ignore hidden dirs
+**/.*
