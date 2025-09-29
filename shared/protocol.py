@@ -3,6 +3,8 @@
 
 import json
 from datetime import datetime
+import base64
+from shared import EncryptionUtilsForOG
 
 # Protocol Version
 PROTOCOL_VERSION = "1.0"
@@ -20,8 +22,17 @@ PROTOCOL_VERSION = "1.0"
 
 # Function to encode a chat message
 # Takes a sender, message, and an optional timestamp
-def encode_message(sender: str, message: str, timestamp = None, type: str = 'chat_message', **kwargs) -> str:
-    """Encodes a chat message into a JSON string with support for extra fields."""
+def encode_message(
+        sender: str, 
+        message: str, 
+        timestamp = None, 
+        type: str = 'chat_message', 
+        session_key: bytes = None,
+        **kwargs) -> str:
+    """
+    Encodes a chat message (or other type) into a JSON string with support for extra fields.
+    If session_key is provided, encrypts the JSON string and returns an 'encrypted_message' wrapper instead.
+    """
     
     # Validate inputs
     if not sender or not message:
@@ -52,15 +63,35 @@ def encode_message(sender: str, message: str, timestamp = None, type: str = 'cha
     # Add any additional fields
     message_dict.update(kwargs)
 
-    return json.dumps(message_dict)
+    # If no session_key -> return plaintext JSON
+    if session_key is None:
+        return json.dumps(message_dict)
+    
+    # Else: encrypt the full JSON string
+    inner_json = json.dumps(message_dict)
+    encrypted_bytes = EncryptionUtilsForOG.encrypt_message(session_key=session_key, message=inner_json)
+
+    # Wrap as encrypted message
+    return json.dumps({
+        "protocol_version":PROTOCOL_VERSION,
+        "type": "encrypted_message",
+        "sender":sender,
+        "payload_b64": base64.b64encode(encrypted_bytes).decode('ascii'),
+        "timestamp": timestamp,
+    })
+    
 
 # Function to decode a chat message
 # Takes a JSON string and returns a dictionary
-def decode_message(message_str: str) -> dict:
-    """Decodes a chat message from a JSON string into a dictionary."""
-    
+def decode_message(message_str: str, session_key: bytes = None) -> dict:
+    """
+    Decodes a chat message from a JSON string into a dictionary.
+    If the message is 'encrypted_message' and session_key is provided,
+    it will decrypt and then decode the inner message.
+    """
+
     try:
-        return json.loads(message_str)
+        msg = json.loads(message_str)
     except json.JSONDecodeError:
         return {
             "protocol_version": PROTOCOL_VERSION,
@@ -69,6 +100,16 @@ def decode_message(message_str: str) -> dict:
             "message": "[Malformed Message]",
             "timestamp": datetime.now().astimezone().isoformat()
         }
+    
+    if msg.get('type') == 'encrypted_message':
+        if session_key is None:
+            # Can't decrypt, return as-is
+            return msg
+        payload = base64.b64decode(msg["payload_b64"])
+        inner_json = EncryptionUtilsForOG.decrypt_message(session_key=session_key, encrypted_message=payload)
+        return json.loads(inner_json)
+    
+    return msg
 
 # === Control Messages === #
 # Control messages are used for user registration, connection requests, and system notifications.
