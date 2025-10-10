@@ -19,5 +19,4 @@ __all__ = [
     "BANNER",
     "SecureMethodsForOG",
     "EncryptionUtilsForOG"
-
 ]

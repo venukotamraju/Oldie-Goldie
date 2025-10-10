@@ -1,9 +1,12 @@
 import asyncio
-from typing import Any
 import websockets
 import logging
+import base64
+from .helpers.tunnel_activity import TunnelActivityUtilsForOG
 
-from shared import encode_message, decode_message, make_register_message, BANNER
+from shared import encode_message, decode_message, make_register_message
+from shared import BANNER
+from shared import EncryptionUtilsForOG, SecureMethodsForOG
 
 # Importing the CommandHandler class from shared.command_handler module
 # This class is responsible for managing commands and their execution in the chat client.
@@ -23,7 +26,7 @@ session = PromptSession()
 # expose session and allow external refresh
 get_prompt_session = lambda: session
 
-# Importing aprint from the utility module
+# Importing aprint from the utility module ## Deprecated, utility module is no longer needed using prompt_toolkit as a default dependency
 # This utility function is used to handle asynchronous output without blocking the event loop.
 
 async def prompt_async_print(*args, **kwargs) -> None:
@@ -56,8 +59,10 @@ logger = logging.getLogger(__name__)
 active_websocket: websockets.ClientConnection
 current_username: str
 
+tunnel_utils = TunnelActivityUtilsForOG()
+
 # === Input management state === #
-input_mode = 'chat' # other possible value: "chat", "psk", "locked"
+input_mode = 'chat' # other possible value: "chat", "psk", "locked","encrypted"
 input_future: asyncio.Future | None = None
 
 def set_input_mode(mode: str):
@@ -83,7 +88,9 @@ def set_input_mode(mode: str):
 
 # === Client Global Events Object For Protocol Type === #
 client_event_types = {
-    'TUNNEL_EXIT': "tunnel_exit",
+    'TUNNEL_EXIT': 'tunnel_exit',
+    'KEY_SHARE': 'key_share',
+    'ENCRYPTED_MESSAGE': 'encrypted_message'
 }
 
 # =========== #
@@ -220,13 +227,24 @@ async def start_tunnel_validation(peer: str):
 
     try:
         psk_entered = await asyncio.wait_for(input_future, timeout=TUNNEL_TIMEOUT)
-    
-        # Send PSK to server
+        
+        # Hash the psk to confidentially send it to the server for validation
+        hashed_psk = SecureMethodsForOG.hash_psk(psk=psk_entered)
+        logger.debug('[start_tunnel_validation] Hashing PSK')
+        
+        # set the psk_hash in the tunnel utils, to use its functionality if the psk gets verified
+        tunnel_utils.set_psk_hash(psk_hash=hashed_psk)
+
+        # encode the bytes to make them suitable for transmission
+        encoded_psk_hash = base64.b64encode(hashed_psk).decode('utf-8')
+        logger.debug('[start_tunnel_validation] Encoding the psk hash to base 64')
+
+        # Send encoded PSK hash to server
         await active_websocket.send(
             encode_message(
                 type="tunnel_secret",
                 sender=current_username,
-                secret=psk_entered,
+                secret=encoded_psk_hash,
                 message="tunnel_secret"
             )
         )
@@ -363,6 +381,7 @@ async def cmd_exit_tunnel(_: str):
 
     logger.info(f"[cmd_exit_tunnel] Tunnel with @{connection_state['target']} closed.")
     await reset_connection_state()
+    set_input_mode('chat')
 
 def cmd_pending(_: str):
     """ Check the current connection state """
@@ -392,7 +411,7 @@ command_handler.register_command("/pending", cmd_pending)
 # Messaging
 # ========================== #
 
-async def handle_chat_input(message: str, websocket: websockets.ClientConnection, username: str):
+async def handle_chat_input(message: str, websocket: websockets.ClientConnection, username: str, session_key: bytes):
     
     # Handle custom commands
     if message.strip().startswith("/"):
@@ -422,8 +441,12 @@ async def handle_chat_input(message: str, websocket: websockets.ClientConnection
     
     # Send the message if everything is fine
     else:
-        encoded = encode_message(message=message, sender=username)
-        await websocket.send(encoded)
+        if not session_key:
+            encoded = encode_message(message=message, sender=username)
+            await websocket.send(encoded)
+        elif session_key:
+            encoded = encode_message(message=message, sender=username, type='encrypted_message', session_key=session_key, target=connection_state['target'])
+            await websocket.send(encoded)
 
 async def send_messages(websocket: websockets.ClientConnection, username: str):
     """ 
@@ -454,15 +477,24 @@ async def send_messages(websocket: websockets.ClientConnection, username: str):
 
                 continue
             
-            elif input_mode == "chat":
+            elif input_mode in ('chat', 'encrypted'):
                 message = await safe_input()
                 
                 # If the message is empty, we skip sending it
-                if message.strip() == "":
-                    logger.info("[send_messages] Empty message entered. Skipping send.")
-                    await aprint()
-                else: 
-                    await handle_chat_input(message=message, websocket=websocket, username=username)
+                if message:
+                    if message.strip() == "":
+                        logger.info("[send_messages] Empty message entered. Skipping send.")
+                        await aprint()
+                    else:
+                        if input_mode == 'chat':
+                            await handle_chat_input(message=message,websocket=websocket, username=username, session_key=None)
+                        elif input_mode == 'encrypted':
+                            session_key = tunnel_utils.get_session_key()
+                            if session_key:
+                                await handle_chat_input(message=message, websocket=websocket, username=username, session_key=session_key)
+                            else:
+                                logger.error('[send_messages] No session key, switching input mode to chat')
+                                set_input_mode('chat')
             
             elif input_mode == "locked":
                 await asyncio.sleep(0.1)
@@ -552,7 +584,7 @@ async def receive_messages(websocket: websockets.ClientConnection):
             
             elif msg_type == 'tunnel_validate':
                 # Start PSK validation prompt for the initiator
-                
+                peer = decoded.get("sender")
                 logger.info("[receive_messages.tunnel_validate] Triggering tunnel validation.")
 
                 task = asyncio.create_task(start_tunnel_validation(peer=str(peer)))
@@ -561,19 +593,53 @@ async def receive_messages(websocket: websockets.ClientConnection):
                 if not psk_entry:
                     await reset_connection_state()
 
+            elif msg_type == "tunnel_ok_key_init":
+                peer = connection_state['target']
 
-            elif msg_type == "tunnel_established":
                 # Server confirms PSK exchange
-                logger.info("[receive_messages] Tunnel PSK confirmed. Private tunnel is now active.\n")
+                logger.info("[receive_messages.tunnel_ok_key_init] Tunnel PSK confirmed. Invoking key share.\n")
                 await aprint()
-                
+
                 connection_state["status"] = "tunnel_active"
                 input_mode = "chat"
+
+                # Invoke the helper method to establish changes like generating
+                # key pair and sharing public key in accordance of the active tunnel.
+                logger.debug('[receive_messages.tunnel_established] Utilizing TunnelActivityUtilsForOG, Generating Key Pair, Sending public key to peer')
+                
+                task = asyncio.create_task(tunnel_utils.handle_key_share(target=str(peer), username=current_username, websocket=active_websocket))
+                await task
 
             elif msg_type == "tunnel_failed":
                 logger.info("[receive_messages] Tunnel validation failed. PSK mismatch.")
                 await reset_connection_state()
                 input_mode = "chat"
+            
+            # ========================== 
+            # Tunnel Core Events
+            # ========================== 
+            elif msg_type == client_event_types['KEY_SHARE']:
+                sender = decoded.get('sender')
+                encoded_public_key = decoded.get('key')
+                if connection_state.get('target') == sender:
+                    tunnel_utils.set_peer_public_key(encoded_peer_public_key=encoded_public_key)
+                    logger.info(f"[receive_messages] Received Public Key from @{sender}")
+
+                    # invoke handler for session secret
+                    if tunnel_utils.get_peer_public_key_bytes():
+                        tunnel_utils.handle_shared_secret()
+
+                    # Also invoke handler for session_secret
+                    if tunnel_utils.get_peer_public_key_bytes() and tunnel_utils.get_psk_hash():
+                        tunnel_utils.handle_session_secret()
+                    
+                    # Now, Introduce a new chat mode. Call it `encrypted`. Add support in send_messages for the new chat state.
+                    set_input_mode('encrypted')
+            
+            elif msg_type == client_event_types['ENCRYPTED_MESSAGE']:
+                logger.info(f'[receive_messages.encrypted_message] Received message: {decoded}')
+
+                # Continue here.
 
             # ========================== 
             # Tunnel Exit Event
@@ -582,9 +648,9 @@ async def receive_messages(websocket: websockets.ClientConnection):
             elif msg_type == "tunnel_exit":
                 logger.info(f"[receive_messages] {decoded.get('message')}")
                 await reset_connection_state()
-                input_mode = "chat"
-            
-            
+                await tunnel_utils.reset()
+                set_input_mode('chat')
+
             # ========================== 
             # Disconnection Event
             # ========================== 
@@ -597,6 +663,7 @@ async def receive_messages(websocket: websockets.ClientConnection):
                 
                 if connection_state.get("target") == user:
                     await reset_connection_state()
+                    await tunnel_utils.reset()
 
             # ==========================
             # Normal Broadcast/Chat Messages

@@ -1,6 +1,7 @@
 import asyncio
 import websockets
 import websockets.legacy.server
+from websockets.legacy.server import WebSocketServerProtocol
 import logging
 from shared import encode_message, decode_message, make_register_message, make_connect_request, make_connect_response, make_user_disconnected_message, make_system_notification
 from shared import BANNER
@@ -31,6 +32,9 @@ blocked_usernames: set[str] = set()
 
 # Pending tunnel validation states
 pending_validations: dict[tuple[str, str], dict] = {}
+
+# active tunnels. This is of no consequence
+active_tunnels: set[tuple[WebSocketServerProtocol, WebSocketServerProtocol]] = set()
 
 def is_valid_username_format(username: str) -> tuple[bool, str]:
     """Validates the format of the username and returns a tuple of (is_valid, reason)"""
@@ -257,7 +261,7 @@ async def broadcast(websocket:websockets.legacy.server.WebSocketServerProtocol, 
 
                 logger.info(f"[broadcast.tunnel_secret] sender: @{sender}, secret: @{secret}")
 
-                # Find the pending valdation involving this sender
+                # Find the pending validation involving this sender
                 for (a, b), val_data in list(pending_validations.items()):
                     if sender in (a, b):
                         val_data["secrets"][sender] = secret
@@ -273,13 +277,17 @@ async def broadcast(websocket:websockets.legacy.server.WebSocketServerProtocol, 
 
                             if s1 == s2:
                                 # Success
+                                # add the websockets to the active_tunnels holder
+                                active_tunnels.add((ws1, ws2))
+
+                                # Send the message stating that the secret is verified and initialise key generation and transfer
                                 await ws1.send(encode_message(
-                                    type="tunnel_established",
+                                    type="tunnel_ok_key_init",
                                     sender="Server",
                                     message="Tunnel successfully established!"
                                 ))
                                 await ws2.send(encode_message(
-                                    type="tunnel_established",
+                                    type="tunnel_ok_key_init",
                                     sender="Server",
                                     message="Tunnel successfully established!"
                                 ))
@@ -301,6 +309,30 @@ async def broadcast(websocket:websockets.legacy.server.WebSocketServerProtocol, 
                                 await ws2.close()
 
                             del pending_validations[(a, b)]
+
+            if decoded.get('type') == 'key_share':
+                sender = user_reg_web.get(websocket)
+                target = decoded.get('target')
+                key = decoded.get('key')
+                logger.info(f'[broadcast.key_share] Received Public key from @{sender}: {key}')
+                
+                if target in user_reg_id:
+                    target_websocket = user_reg_id.get(target)
+                    await target_websocket.send(
+                        encode_message(
+                            type='key_share',
+                            sender=sender,
+                            key = key,
+                            message=f"@{sender} is sharing their public key"
+                        )
+                    )
+                else:
+                    logger.warning(f'[broadcast.key_share] Target: {target} not found in user_reg_id')
+                    await websocket.send(encode_message(
+                        type="connect_error",
+                        sender="Server",
+                        message=f"Requester @{requester} not found."
+                    ))
 
             #### TUNNEL EXIT ####
             if decoded.get("type") == "tunnel_exit":
@@ -328,7 +360,52 @@ async def broadcast(websocket:websockets.legacy.server.WebSocketServerProtocol, 
                             message=f"(server) {source_user} has exited the tunnel"
                         )
                     )
-                
+
+                    # Remove the pair from active_tunnels
+                    for ws_pair in list(active_tunnels):
+                        if websocket in ws_pair:
+                            logger.info(f'[broadcast.tunnel_exit] Removing ({source_user, target_user}) from active tunnel set')
+                            active_tunnels.remove(ws_pair)
+                    
+                    # Log the updated active tunnel set
+                    logger.info(f'Updated Active Tunnel Set: {active_tunnels}')                
+
+            if decoded.get('type') == 'encrypted_message':
+                source_user = user_reg_web.get(websocket)
+                target_user = decoded.get('target')
+
+                logger.info(f'[broadcast.encrypted_message.debug] Target: `{target_user}`')
+
+                # Log the event
+                logger.info(f'[broadcast] Received `encrypted_message` from {source_user}. Relaying to {target_user} ')
+
+                # Relay the payload
+                # Check for the presence of peer connection
+                # Check for the presence in active_tunnel
+                # If any of the peer is not present in any of either, respond to the sender with a connect error
+                source_user_web = websocket
+                target_user_web = user_reg_id.get(target_user)
+                if (not source_user) or (not target_user) or (target_user not in user_reg_id):
+                    await source_user_web.send(
+                        encode_message(
+                            type='connect_error',
+                            sender='Server',
+                            message=f'Could not find user @{target_user} to connect.'
+                        )
+                    )
+                else:
+                    for ws_pair in active_tunnels:
+                        if source_user_web in ws_pair and target_user_web in ws_pair:
+                            # Relay the message
+                            await target_user_web.send(message=message)
+                        else:
+                            source_user_web.send(
+                                encode_message(
+                                    type='connect_error',
+                                    sender='Server',
+                                    message=f'User @{target_user} is not participating in an active tunnel with you.'
+                                )
+                            )                
 
             # Normal broadcast (only for idle chat)
             if decoded["type"] == 'chat_message':
@@ -412,6 +489,18 @@ async def handler(websocket):
             del user_registry_by_websocket[websocket]
             logger.info(f"[handler] [-] User '{username}' has been removed from the registry.")
         
+        # Remove the pair if present from the active_tunnel when faced a client disconnect instead of a tunnel disconnect via exit_tunnel
+        for ws_pair in list(active_tunnels):
+            if websocket in ws_pair:
+                
+                # Log the removal via disconnection
+                logger.info('[handler] Client\'s presence found in active tunnel set. Removing the pair.')
+
+                active_tunnels.remove(ws_pair)
+
+                # Log the updated active tunnel set
+                logger.info(f'[handler] updated active tunnel set: {active_tunnels}')
+
         # Notify all connected clients about the disconnection
         disconnect_message = make_user_disconnected_message(username=username) # type: ignore
         logger.info(f"[handler] [!] User '{username}' has disconnected. Sending disconnection message to all clients.")

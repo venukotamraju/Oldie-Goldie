@@ -4,7 +4,7 @@
 import json
 from datetime import datetime
 import base64
-from shared import EncryptionUtilsForOG
+from .crypto.encryption_handlers import EncryptionUtilsForOG
 
 # Protocol Version
 PROTOCOL_VERSION = "1.0"
@@ -32,6 +32,7 @@ def encode_message(
     """
     Encodes a chat message (or other type) into a JSON string with support for extra fields.
     If session_key is provided, encrypts the JSON string and returns an 'encrypted_message' wrapper instead.
+    Ensure you pass `target` via **kwargs, if the message is intended for a peer/recipient
     """
     
     # Validate inputs
@@ -78,6 +79,7 @@ def encode_message(
         "sender":sender,
         "payload_b64": base64.b64encode(encrypted_bytes).decode('ascii'),
         "timestamp": timestamp,
+        "target": kwargs.get('target', None)        
     })
     
 
