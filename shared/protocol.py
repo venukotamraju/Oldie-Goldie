@@ -171,5 +171,36 @@ def make_system_notification(message: str) -> str:
         "timestamp": datetime.now().astimezone().isoformat()
     })
 
+def make_system_request(need: str, username: str) -> str:
+    """Make general requests to the server that are not personalised to any user.
 
+    Args:
+        need (str)
+            supported needs:
+            1. list_users
+        
+        username (str)
 
+    Returns:
+        str:
+            return a json string
+    """
+    return json.dumps({
+        'protocol_version': PROTOCOL_VERSION,
+        'type': 'system_request',
+        'need': need,
+        'sender': username,
+        'timestamp': datetime.now().astimezone().isoformat()        
+    })
+
+def make_system_response(res_obj: any = None, res_need: str = None):
+    """Respond to the system request with this structure
+    """
+    return json.dumps({
+        'protocol_version': PROTOCOL_VERSION,
+        'sender':'server',
+        'type':'system_response',
+        'response_need':res_need,
+        'res_info': res_obj,
+        'timestamp': datetime.now().astimezone().isoformat()
+    })

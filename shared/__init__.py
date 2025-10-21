@@ -1,7 +1,7 @@
 """_summary_
 Contains Core utilities for OG
 """
-from .protocol import encode_message, decode_message, make_register_message, make_connect_request, make_connect_response, make_user_disconnected_message, make_system_notification
+from .protocol import encode_message, decode_message, make_register_message, make_connect_request, make_connect_response, make_user_disconnected_message, make_system_notification, make_system_request, make_system_response
 from .command_handler import CommandHandler
 from .art_forms import BANNER
 from .crypto.session_keys import SecureMethodsForOG
@@ -15,6 +15,8 @@ __all__ = [
     "make_connect_response",
     "make_user_disconnected_message",
     "make_system_notification",
+    "make_system_request",
+    "make_system_response",
     "CommandHandler",
     "BANNER",
     "SecureMethodsForOG",

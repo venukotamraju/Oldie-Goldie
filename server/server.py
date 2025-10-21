@@ -3,7 +3,7 @@ import websockets
 import websockets.legacy.server
 from websockets.legacy.server import WebSocketServerProtocol
 import logging
-from shared import encode_message, decode_message, make_register_message, make_connect_request, make_connect_response, make_user_disconnected_message, make_system_notification
+from shared import encode_message, decode_message, make_register_message, make_user_disconnected_message, make_system_response
 from shared import BANNER
 # Logging configuration and setup
 # This will log messages to the console with a specific format
@@ -407,8 +407,23 @@ async def broadcast(websocket:websockets.legacy.server.WebSocketServerProtocol, 
                                 )
                             )                
 
+            #### Client System Request Events #####
+            # this includes the response to following needs:
+            # 1. 'list_users'
+            if decoded['type'] == 'system_request':
+                sender = decoded['sender']
+                if decoded['need'] == 'list_users':
+                    await websocket.send(
+                        make_system_response(
+                            res_need='list_users',
+                            res_obj=list(user_reg_id.keys())
+                        )
+                    )
+            
             # Normal broadcast (only for idle chat)
             if decoded["type"] == 'chat_message':
+
+                # this is to create a list for logging, it has not functional use
                 broadcast_to = list(user_reg_web.values())
                 current_user = user_reg_web.get(websocket)
                 if current_user in broadcast_to:
@@ -416,8 +431,15 @@ async def broadcast(websocket:websockets.legacy.server.WebSocketServerProtocol, 
 
                 logger.info(f"[broadcast] Received message from: {user_reg_web.get(websocket)}\nDecoded message: {decode_message(str(message))}\nBroadcasting to these users: {broadcast_to}")
                 
+                # Before broadcasting, we have to make sure not to broadcast to active tunnel users
+                # For this, since we have the `active_tunnels` of type set[tuple], we will create a new one dimensional iterable object to help speed up the iteration
+                active_tunnels_iter:set[WebSocketServerProtocol] = set()
+                for ws_pair in active_tunnels:
+                    active_tunnels_iter.add(ws_pair[0])
+                    active_tunnels_iter.add(ws_pair[1])
+
                 for client_ws in user_reg_id.values():
-                    if client_ws != websocket:
+                    if client_ws != websocket and client_ws not in active_tunnels_iter:
                         await client_ws.send(message)
 
     except websockets.exceptions.ConnectionClosed:
@@ -507,15 +529,28 @@ async def handler(websocket):
         print('user_registry_update: ', user_registry_by_id)      
         
         # Send the disconnection message to all connected clients
-        # This informs all other clients that the user has disconnected        
+        # This informs all other clients that the user has disconnected
+        # 
+        # And while informing the clients, there are two flows:
+        # We should not inform the disconnection of general users to tunnel users to not disturb the session
+        # if a tunnel user is disconnected, all the users should be informed
+        active_tunnels_iter = set()
+        for ws_pair in active_tunnels:
+            active_tunnels_iter.add(ws_pair[0])
+            active_tunnels_iter.add(ws_pair[1])
+
+        # Now we are ready with a one dimensional iterable object containing the active_tunnel users
         for client_ws in list(user_registry_by_id.values()): # ignore the list warning as we are trying to protect against concurrent overlapping and error due to in-loop dict modification.
             
-            try:
-                await client_ws.send(disconnect_message)
-            
-            except (websockets.exceptions.ConnectionClosedError, websockets.exceptions.ConnectionClosedOK):
-                # If the client is already disconnected, we can ignore this error
-                logger.info(f"[handler] [!] Client {client_ws} is already disconnected.")
+            # This is assuming, the one disconnected is not in the active_tunnels list or has been terminated from it
+            # So not disturbing the ones in the active_tunnels list
+            if client_ws not in active_tunnels_iter:
+                try:
+                    await client_ws.send(disconnect_message)
+                
+                except (websockets.exceptions.ConnectionClosedError, websockets.exceptions.ConnectionClosedOK):
+                    # If the client is already disconnected, we can ignore this error
+                    logger.info(f"[handler] [!] Client {client_ws} is already disconnected.")
 
 # If one user never sends their secret, the pending_validations entry remains forever. We should schedule a timeout cleanup task.
 async def check_tunnel_timeouts():

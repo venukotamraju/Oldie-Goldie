@@ -2,11 +2,12 @@ import asyncio
 import websockets
 import logging
 import base64
+from datetime import datetime
 from .helpers.tunnel_activity import TunnelActivityUtilsForOG
 
-from shared import encode_message, decode_message, make_register_message
+from shared import encode_message, decode_message, make_register_message,make_system_request
 from shared import BANNER
-from shared import EncryptionUtilsForOG, SecureMethodsForOG
+from shared import SecureMethodsForOG
 
 # Importing the CommandHandler class from shared.command_handler module
 # This class is responsible for managing commands and their execution in the chat client.
@@ -20,6 +21,7 @@ from shared import CommandHandler
 from prompt_toolkit import PromptSession
 from prompt_toolkit.application import get_app_or_none
 from prompt_toolkit.patch_stdout import patch_stdout
+from prompt_toolkit.formatted_text import FormattedText
 
 session = PromptSession()
 
@@ -90,7 +92,8 @@ def set_input_mode(mode: str):
 client_event_types = {
     'TUNNEL_EXIT': 'tunnel_exit',
     'KEY_SHARE': 'key_share',
-    'ENCRYPTED_MESSAGE': 'encrypted_message'
+    'ENCRYPTED_MESSAGE': 'encrypted_message',
+    'SYSTEM_RESPONSE': 'system_response'
 }
 
 # =========== #
@@ -100,28 +103,74 @@ client_event_types = {
 # Safe Input
 # ======================== #
 
-async def safe_input(prompt: str = "> ") -> str:
-    """ Safe input wrapper with exception handling for keyboard interrupts and EOF errors as well as natively async input handling so to not block the event loop which happens when we use conventional input which is blocking in nature. (eliminates the need for spawning threads)\n
-    This function is a wrapper around the ainput function from aioconsole, which allows for asynchronous input handling.\n
-    If a KeyboardInterrupt or EOFError occurs, it logs a warning and raises a KeyboardInterrupt to signal the user that input was interrupted.
+async def safe_input(prompt: str = "> ", password: bool = False, color: str = None) -> str:
+    """ Asynchronous, safe user input wrapper with prompt_toolkit.
+    
+    - Uses async prompt to avoid blocking event loop.
+
+    Supports:
+    - password masking via `password=True`.
+    - colorized prompts
+    - Graceful Ctrl+C / EOF handling.
+    
+    
 
     Args:
-        prompt (str): The prompt to display to the user for input. Defaults to an empty string.
-    
-    Returns:
-        str: The user input as a string.
-    
+        prompt (str, optional): The text that should be displayed as the prompt while taking in user input. Defaults to "> ".
+        password (bool, optional): If True, the text input will be taken in as password format else plain text format. Defaults to False.
+        color (str, optional): 
+            Available ANSI colors:
+                /# Low intensity, dark.  (One or two components 0x80, the other 0x00.)
+                    ansiblack, ansired, ansigreen, ansiyellow, ansiblue
+                    ansimagenta, ansicyan, ansigray
+
+                /# High intensity, bright
+                    ansibrightblack, ansibrightred, ansibrightgreen, ansibrightyellow
+                    ansibrightblue, ansibrightmagenta, ansibrightcyan, ansiwhite        
+            \n Defaults to None.
+
     Raises:
-        KeyboardInterrupt: If the user interrupts the input with Ctrl+C or EOF is detected.
+        KeyboardInterrupt: _description_
+
+    Returns:
+        str: _description_
     """
+    
+    # Build colored prompt
+    ## First take in normal prompt if color is not passed
+    workable_prompt = prompt
+
+    ## Now validate the color
+    available_color = ('ansiblack', 'ansired', 'ansigreen', 'ansiyellow', 'ansiblue'
+                'ansimagenta', 'ansicyan', 'ansigray','ansibrightblack', 'ansibrightred', 'ansibrightgreen', 'ansibrightyellow'
+                'ansibrightblue', 'ansibrightmagenta', 'ansibrightcyan', 'ansiwhite')
+    
+    if color:
+        if color not in available_color:
+            color = None
+            # Don't make any changes to workable prompt, just pass in the prompt as is, prompt_toolkit will take care of assigning a default color.
+        else:
+        ## Update workable prompt if color is passed
+            workable_prompt = FormattedText([
+                (f"{color} bold", prompt)
+            ])
+
+    
 
     try:
         with patch_stdout():
-            return await session.prompt_async(prompt)
+            # Use password masking if requested
+            return await session.prompt_async(
+                workable_prompt,
+                is_password=password,
+                enable_history_search=True,
+                wrap_lines=False,
+            )
 
     except (KeyboardInterrupt, EOFError):
-        logger.warning("[safe_input] keyboard interrupt or EOF detected")
+        logger.warning("[safe_input] Keyboard interrupt or EOF detected")
         raise KeyboardInterrupt
+
 
 
 # ======================== #
@@ -134,7 +183,7 @@ async def confirm_exit() -> bool:
     """ Prompt the user to confirm if they really want to exit """
 
     while True:
-        response = await safe_input("\n Confirm your will to exit (y/n) ")
+        response = await safe_input(prompt="Confirm your will to exit (y/n) ", color='ansired')
         response = response.strip().lower()
         if response == "y":
             return True
@@ -173,6 +222,7 @@ async def cmd_help(_: str):
         "/pending - List current connection status\n"
         "/deny - Cancel pending connection (incoming or outgoing)\n"
         "/accept - Accept incoming connection request\n"
+        "/list_users - List the users connected to the server you are connected to.\n"
         "/exit_tunnel - Close an active private tunnel\n"
         "Type your message and press Enter to send it.\n"
     )
@@ -391,6 +441,15 @@ def cmd_pending(_: str):
     else:
         logger.info(f"[cmd_pending] Status: {connection_state['status']}, Target: @{connection_state['target']}, Direction: {connection_state['direction']}")
 
+async def cmd_list_users(_:str):
+    """
+    Lists all the users connected along with you to the server.
+    """
+    await active_websocket.send(
+        message = make_system_request(need='list_users', username=current_username)
+    )
+    logger.info('[cmd_list_users] Sent a request to server for a list of users.')
+
 # Helper for task logging (to make sonarQube happy)
 async def wait_and_log_task(task: asyncio.Task, context: str):
     """Wait for a task and log any exception"""
@@ -406,6 +465,7 @@ command_handler.register_command("/accept", cmd_accept)
 command_handler.register_command("/deny", cmd_deny)
 command_handler.register_command("/exit_tunnel", cmd_exit_tunnel)
 command_handler.register_command("/pending", cmd_pending)
+command_handler.register_command("/list_users", cmd_list_users)
 
 # ========================== #
 # Messaging
@@ -471,7 +531,8 @@ async def send_messages(websocket: websockets.ClientConnection, username: str):
             if input_mode == "psk":
                 # Only prompt once
                 if input_future and not input_future.done():
-                    message = await safe_input('Enter PSK: ')
+                    prompt_text = FormattedText([(' bold','')])
+                    message = await safe_input(prompt='🔐 Enter PSK: ', password=True, color='ansiyellow')
                     input_future.set_result(message)
                 set_input_mode('locked')
 
@@ -533,7 +594,7 @@ async def receive_messages(websocket: websockets.ClientConnection):
 
         try:
             message = await websocket.recv()
-            decoded = decode_message(message_str=str(message))
+            decoded = decode_message(message_str=str(message), session_key=tunnel_utils.get_session_key())
             msg_type = decoded.get("type")
 
             # ==========================
@@ -637,9 +698,12 @@ async def receive_messages(websocket: websockets.ClientConnection):
                     set_input_mode('encrypted')
             
             elif msg_type == client_event_types['ENCRYPTED_MESSAGE']:
-                logger.info(f'[receive_messages.encrypted_message] Received message: {decoded}')
-
-                # Continue here.
+                logger.debug(f'[receive_messages.encrypted_message] Received message: {decoded}')
+                readable_timestamp = datetime.fromisoformat(decoded.get('timestamp'))
+                sender = decoded.get('sender','unknown')
+                text = decoded.get('message','')
+                _type = decoded.get('type','')
+                await aprint(f"\n[{readable_timestamp}] [{_type}] {sender}: {text}")                
 
             # ========================== 
             # Tunnel Exit Event
@@ -650,6 +714,15 @@ async def receive_messages(websocket: websockets.ClientConnection):
                 await reset_connection_state()
                 await tunnel_utils.reset()
                 set_input_mode('chat')
+
+            # ========================== 
+            # System Request and Response Events
+            # ==========================
+            elif msg_type == client_event_types['SYSTEM_RESPONSE']:
+                readable_timestamp = datetime.fromisoformat(decoded['timestamp'] if decoded['timestamp'] != '???' else '???')
+                sender = decoded.get('sender')
+                res_obj = decoded.get('res_info')
+                logger.info(f'[receive_messages.system_response.list_users] [{readable_timestamp}] {sender}: {res_obj}')
 
             # ========================== 
             # Disconnection Event
@@ -664,15 +737,17 @@ async def receive_messages(websocket: websockets.ClientConnection):
                 if connection_state.get("target") == user:
                     await reset_connection_state()
                     await tunnel_utils.reset()
+                    set_input_mode('chat')
 
             # ==========================
             # Normal Broadcast/Chat Messages
             # ========================== 
             else:
                 timestamp = decoded.get("timestamp", "???")
+                readable_timestamp = datetime.fromisoformat(timestamp) if timestamp != '???' else '???'
                 sender = decoded.get("sender", "unknown")
                 text = decoded.get("message", "")
-                await aprint(f"\n[{timestamp}] {sender}: {text}")
+                await aprint(f"\n[{readable_timestamp}] {sender}: {text}")
 
         except websockets.exceptions.ConnectionClosed:
             # This exception occurs when a keyboard interrupt is experienced 
@@ -725,7 +800,7 @@ async def handle_username_registration(websocket) -> str | None:
     async def safe_username_input() -> str | None:
         """ A exception handling wrapper for safe input used only for handle_username_registration as there is traceback occurring with KeyboardInterrupt when safe_input is declared as a task to prompt for username """
         try:
-            return await safe_input()
+            return await safe_input(prompt='Enter Username: ', color='ansiyellow')
         except KeyboardInterrupt:
             logger.info("[handle_username_registration] Suppressed KeyboardInterrupt *inside* safe_username_input.")
             
@@ -738,7 +813,7 @@ async def handle_username_registration(websocket) -> str | None:
             await aprint("\n⏰ Time expired! You took too long to register.")
             return None
         
-        await aprint(f"\n🔐 Enter your username (Attempts left: {MAX_ATTEMPTS - attempts}, Time left: {int(time_left)}s):")
+        await aprint(f"\n🔐 Username Attempt (Attempts left: {MAX_ATTEMPTS - attempts}, Time left: {int(time_left)}s):")
         
         try:
             username_task = asyncio.create_task(safe_username_input())
@@ -764,7 +839,7 @@ async def handle_username_registration(websocket) -> str | None:
             
             username = (username_input or "").split()[0] if username_input else ""
 
-            logger.info(msg=f"[handle_username_registration] username from task result: {username}")
+            logger.debug(msg=f"[handle_username_registration] username from task result: {username}")
             
             if not username:
                 logger.warning("❗Username cannot be empty. Try better bro...😑")
