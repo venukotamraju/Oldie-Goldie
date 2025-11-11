@@ -1,10 +1,20 @@
 import asyncio
+import time
+from typing import Optional
 import websockets
 import websockets.legacy.server
 from websockets.legacy.server import WebSocketServerProtocol
 import logging
 from shared import encode_message, decode_message, make_register_message, make_user_disconnected_message, make_system_response
 from shared import BANNER
+import argparse
+import sys
+import shutil
+import subprocess
+from .helpers.tunnel_manager import TunnelManager
+import secrets
+from http import HTTPStatus
+
 # Logging configuration and setup
 # This will log messages to the console with a specific format
 # You can change the logging level
@@ -36,6 +46,11 @@ pending_validations: dict[tuple[str, str], dict] = {}
 # active tunnels. This is of no consequence
 active_tunnels: set[tuple[WebSocketServerProtocol, WebSocketServerProtocol]] = set()
 
+# If invite_tokens is passed for authorization
+invite_tokens = {}
+
+invite_token = False
+
 def is_valid_username_format(username: str) -> tuple[bool, str]:
     """Validates the format of the username and returns a tuple of (is_valid, reason)"""
     reserved_keywords = {
@@ -60,7 +75,7 @@ def is_valid_username_format(username: str) -> tuple[bool, str]:
         return False, "Username 'server' is not for you bro 😤"
     return True, ""
 
-async def handle_registration(websocket) -> str | None:
+async def handle_registration(websocket, bound_username:str) -> str | None:
     TIMEOUT = 10
     MAX_ATTEMPTS = 4
     attempts = 0
@@ -117,6 +132,14 @@ async def handle_registration(websocket) -> str | None:
                         sender="Server",
                         message=f"⛔ Username '{username}' has been blocked. Restart required with a new identity."
                     ))
+                elif bound_username and (username != bound_username):
+                    await websocket.send(
+                        encode_message(
+                            type="register_error",
+                            sender="Server",
+                            message=f"⛔ You are using a token bound to another username. If you have misspelled please try again else do not misuse the token that's not meant for you!"
+                        )
+                    )
                 else:
                     return username # ✅ Success
         except asyncio.TimeoutError:
@@ -445,19 +468,38 @@ async def broadcast(websocket:websockets.legacy.server.WebSocketServerProtocol, 
     except websockets.exceptions.ConnectionClosed:
         pass
 
-
 async def handler(websocket):
     """Handles incoming websocket connections and registration of users."""
+    global invite_tokens
+
+    # Extract the token from connection info
+    token = websocket.request.headers.get('Authorization')
+    token_bound_username = None
+    
+    if invite_token:
+        if not token or (token not in invite_tokens):
+            logger.info(f"[handler] Invalid Token, Closing connection")
+            await websocket.close(code=4001, reason='Invalid or missing token')
+            return
+        
+        token_bound_username = invite_tokens[token]['username']
+        
+        if not token_bound_username:
+            del invite_tokens[token]
+            logger.info(f'[handler] Consuming token {token}. Updated invite_tokens: {invite_tokens}')
 
     try:
         # Receive the initial (register) message from the client
         # This is expected to be a registration message containing the username
         logger.info("[handler] Starting registration phase...")
-        username = await handle_registration(websocket=websocket)
+        username = await handle_registration(websocket=websocket, bound_username=token_bound_username)
         
         if username is None:
             logger.info("[handler] Registration failed or timed out")
             return
+
+        if token_bound_username and username:
+            del invite_tokens[token]
 
         # Register the user in the user registry
         logger.info(f"[handler] Registering user '{username}' with websocket {websocket}")
@@ -572,14 +614,257 @@ async def check_tunnel_timeouts():
             for u in pair:
                 blocked_usernames.add(u)
             del pending_validations[pair]
+        
+        # Clean Up Expired Invite Tokens
+        expired_tokens = [
+            tok for tok, meta in invite_tokens.items() 
+            if meta['expiry'] is not None and now > meta['expiry']
+            ]
+        for tok in expired_tokens:
+            del invite_tokens[tok]
+
         await asyncio.sleep(1)
 
+def parse_args():
+    p = argparse.ArgumentParser(
+        description="Oldie-Goldie's secure server. To serve, run: python -m server.server --host {local|public}",
+        epilog=(
+            "When using both --bind and --token-count, the value for --token-count must not be less than the number of usernames provided via --bind.\n"
+            "Explanation:\n"
+            "The --token-count value determines the total number of tokens to generate. Tokens are first mapped to the usernames passed via --bind. Any remaining tokens (up to the specified count) will be generated as unmapped tokens.\n"
+            "Example:\n"
+            "  --bind user1 user2 --token-count 3\n"
+            "  → Generates two mapped tokens (for user1 and user2) and one unmapped token."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,  # keeps formatting & newlines
+    )
+    p.add_argument('--host', choices=['local','public'], required=True, help='local or public (cloudflared)')
+    p.add_argument('--port', type=int, default=8765, help='port to run the server on. default is 8765')
+    p.add_argument('--invite-token', action='store_true', help='generate single-use invite tokens on startup. Default expiry is 10 min')
+    p.add_argument('--bind', nargs='+', help='optional list of usernames to bind tokens to (only when --invite-token used)')
+    p.add_argument('--token-count', type=int, help='how many tokens to create per bound username or globally')
+    p.add_argument('--no-expiry', action='store_true', help='remove expiration of tokens. The tokens will however be discarded when server is closed.')
+    return p.parse_args()
+
+def validate_args(args: argparse.Namespace):
+    """
+    Validate arguments: enforce that --bind and --token-count are only used together with
+    --invite-token, and that when --invite-token is set you get either --token-count (>0)
+    or at least one username in --bind.
+    """
+
+    # If --bind was given (non-empty list), it must be accompanied by --invite-token
+    if args.bind is not None and len(args.bind) > 0:
+        if not args.invite_token:
+            logger.error("[validate_args] Error: --bind is only valid together with --invite-token", file=sys.stderr)
+            sys.exit(1)
+        
+        # Edge cases
+        # 1. If comma separated values are passed, it will be like ['user1,user2']
+        if len(args.bind) == 1:
+            if len(args.bind[0].split(',')) > 1:
+                logger.error('[validate_args] Enter space separated usernames. Example: --bind user1 user2 ...')
+                sys.exit(1)
+        # 2. For every name check the validation using is_valid_username_format method from above the code.
+        for username in args.bind:
+            valid, reason = is_valid_username_format(username)
+            if not valid:
+                logger.error(f"[validate_args] '{username}' is not a valid username format, reason: {reason}")
+                sys.exit(1)
+
+    # If --token-count was given, it must be accompanied by --invite-token
+    if args.token_count is not None:
+        if not args.invite_token:
+            logger.error("[validate_args] Error: --token-count is only valid together with --invite-token", file=sys.stderr)
+            sys.exit(1)
+        if args.token_count <= 0:
+            logger.error("[validate_args] Error: --token-count must be > 0", file=sys.stderr)
+            sys.exit(1)
+
+    # If --invite-token is requested, require either token_count or at least one bind username
+    if args.invite_token:
+        has_bind = (args.bind is not None and len(args.bind) > 0)
+        has_token_count = (args.token_count is not None and args.token_count > 0)
+        if not (has_bind or has_token_count):
+            logger.error("[validate_args] Error: when using --invite-token you must pass either --token-count N (N>0) or --bind <username> [users...]", file=sys.stderr)
+            sys.exit(1)
+        if has_bind and has_token_count:
+            if args.token_count < len(args.bind):
+                logger.error("[validate args] Error: When using both --bind and --token-count, the value for --token-count must not be less than the number of usernames provided via --bind.\nExplanation:\nThe --token-count value determines the total number of tokens to generate. Tokens are first mapped to the usernames passed via --bind. Any remaining tokens (up to the specified count) will be generated as unmapped tokens.\nExample:\n--bind user1 user2 --token-count 3\n→ Generates two mapped tokens (for user1 and user2) and one unmapped token.")
+                sys.exit(1)
+
+    # If --no-expiry is used without --invite-tokens
+    if args.no_expiry:
+        if not args.invite_token:
+            logger.error("[validate_args] --no-expiry should be passed only when --invite-tokens is invoked")
+            sys.exit(1)
+
+def launch_tunnel(port: int) -> Optional[TunnelManager]:
+    """
+    Launch an ephemeral cloudflared tunnel to localhost:port.
+    Returns a TunnelManager or None if cloudflared not found or failed to start.
+    """
+    cmd = shutil.which('cloudflared')
+    if not cmd:
+        print('❌ Cloudflared not found on PATH.')
+        print('Install it from: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation/')
+        return None
+
+    print(f"✅ Launching Cloudflare tunnel for localhost:{port} ...")
+    try:
+        proc = subprocess.Popen(
+            [cmd, 'tunnel', '--url', f"http://localhost:{port}"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1
+        )
+    except Exception as e:
+        print('Failed to launch cloudflared:', e)
+        return None
+
+    return TunnelManager(proc)
+
+async def wait_for_tunnel_url(manager: TunnelManager, timeout: float = 5.0) -> Optional[str]:
+    """
+    Async helper to wait up to `timeout` seconds for manager.url to become available.
+    Returns the URL or None on timeout.
+    """
+    start = time.monotonic()
+    while time.monotonic() - start < timeout:
+        if manager.url:
+            return manager.url
+        await asyncio.sleep(0.1)
+    return manager.url  # might be None
+
+# Invite Token Generation
+def generate_invite_tokens(args):
+    """Generate Invite Tokens if invite_tokens is true in the args dictionary.
+    Added to Validtions:
+    1. If bind is passed, there is no need of passing the token_count.
+    2. If bind and token_count, both are passed, the token_count should not be less than the number of usernames given for bind
+
+    Args:
+        args (args.Namespace): args object provided by Argparser
+    """
+
+    global invite_tokens
+    global invite_token
+
+    invite_token = True
+
+    expiry_time = (time.time() + 600) if not args.no_expiry else None # Token valid for 10 minutes
+    expiry_display = None
+
+    if expiry_time:
+        expiry_minutes = (expiry_time - time.time()) / 60
+        expiry_display = f"{expiry_minutes:.2f}"
+    else:
+        expiry_display = expiry_time
+
+    if args.invite_token:
+        if args.bind:
+            for username in args.bind:
+                # These are mapped tokens
+                token = secrets.token_urlsafe(16)
+                invite_tokens[token] = {"username":username, "expiry":expiry_time}
+                logger.info(f"[generate_invite_tokens] [+] Mapped Token for {username}: {token} with Expiry (in minutes): {expiry_display}")
+            if args.token_count and args.token_count > len(args.bind):
+                # If both --bind and --token-count are present
+                for _ in range (args.token_count - len(args.bind)):
+                    # These are left out unmapped tokens after mapped tokens are done generating
+                    token = secrets.token_urlsafe(16)
+                    invite_tokens[token] = {"username": None, "expiry": expiry_time}
+                    logger.info(f"[generate_invite_tokens] [+] General Token, Username: None, Token: {token}, Expiry (in minutes): {expiry_display}")
+        else:
+            # Only if --token-count is given
+            for _ in range (args.token_count):
+                token = secrets.token_urlsafe(16)
+                invite_tokens[token] = {"username": None, "expiry": expiry_time}
+                logger.info(f"[+] General Token: {token}, Expiry (in minutes): {expiry_display}")
+
+async def process_request(connection, request):
+    """
+    This runs before the websocket handshake.
+    We can reject unauthorized clients here.
+    """
+    now = time.time()
+
+    # Clean up expired tokens
+    expired = [tok for tok, meta in invite_tokens.items() if now > meta["expiry"]]
+    for tok in expired:
+        del invite_tokens[tok]
+    
+     # Skip check if no tokens configured
+    if not invite_token:
+        return None  # continue to handshake
+    
+    # Only check if tokens are enabled
+    auth_header = request.headers.get('Authorization')
+
+    # Invalid or missing token → return 401 and skip handler
+    if not auth_header or (auth_header not in invite_tokens):
+        logger.warning(f"[process_request] Invalid/missing token: {auth_header}")
+
+        # Build proper HTTP 401 response
+        response = (
+            b"HTTP/1.1 401 Unauthorized\r\n"
+            b"Content-Type: text/plain\r\n"
+            b"Content-Length: 23\r\n"
+            b"Connection: close\r\n"
+            b"\r\n"
+            b"Unauthorized or invalid.\n"
+        )
+
+        # Send response directly over the transport
+        try:
+            connection.transport.write(response)
+        # yield control to flush socket buffer
+            await asyncio.sleep(0)
+        except Exception as e:
+            logger.error(f"[process_request] Error sending response: {e}")
+        finally:
+            connection.transport.close()
+        return # stop handshake
+        
+    
+    # Valid token, Don't consume token here; just allow connection
+    return None # Continue to handshake
+
 async def main():
+    # Add support for command line arguments to take in an optional port number
+    args = parse_args()
+    validate_args(args=args)
+    print('[main] args: ', args)
+
     # welcome banner
     print('server\n', BANNER)
+
+    tunnel_mgr = None
+    if args.host == 'public':
+        tunnel_mgr = launch_tunnel(args.port)
+        if tunnel_mgr is None:
+            print("⚠️ Failed to start cloudflared. Falling back to local only mode.")
+        else:
+            url = await wait_for_tunnel_url(tunnel_mgr, timeout=8.0)
+            if url:
+                print(f"Public ephemeral URL: {url}")
+            else:
+                print("⚠️ Cloudflared started but URL not yet available (continuing anyway).")
+    
+    if args.invite_token:
+        generate_invite_tokens(args=args)
+    
     asyncio.create_task(check_tunnel_timeouts()) # Start background task
-    async with websockets.serve(handler, "0.0.0.0", 8765):
-        await asyncio.Future() # Run Forever
+
+    try:
+        async with websockets.serve(handler, "0.0.0.0", port=args.port, process_request=process_request):
+            logger.info(f"Serving on port {args.port} (host={args.host})")
+            await asyncio.Future() # Run Forever
+    finally:
+        # ensure tunnel is shut down when server exits
+        if tunnel_mgr is not None:
+            tunnel_mgr.stop()
 
 if __name__ == "__main__":
     try:

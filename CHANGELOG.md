@@ -9,20 +9,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-_Features and fixes added since `v0.4` milestone._
+_Features and fixes added since `v0.4.1` milestone._
 
-### 🚧 Added
+### 🚀 Added
 
-- Final feature for tunnel lifecycle (TBD)
-- Improvements to PSK input UX and tunnel error handling
+- **Encryption and Decryption Helpers**
+  - Introduced `shared/crypto/encryption_handlers.py` providing:
+    - `encrypt_message(session_key: bytes, message: str) -> bytes`
+    - `decrypt_message(session_key: bytes, encrypted_message: bytes) -> str`
+  - Includes validation and complete secure workflow tests (PSK → hashing → shared secret → encryption → decryption).
 
-### 🐛 Fixed
+- **Protocol-Level Encryption Flow**
+  - Updated `protocol.py` to automatically encrypt/decrypt messages when a `session_key` is passed.
+  - Introduced wrapper structure for encrypted payloads.
+
+- **Peer-to-Peer Encrypted Messaging**
+  - Enabled encrypted tunnel communication between users.
+  - Added new input mode `encrypted` and integrated with `send_messages` and `handle_chat_input`.
+  - Server now relays encrypted messages without decoding.
+
+- **Token-Based Access System**
+  - Added invite-token authentication to secure public servers.
+  - Supports single-use, multi-use, bound, and non-expiring tokens.
+  - Implemented validation during `process_request` before handler invocation.
+  - Added periodic cleanup of expired tokens.
+
+- **Command-Line Enhancements**
+  - Added flexible CLI for both server and client:
+    - `--host local|public`, `--client single|multiple`, `--invite-token`, `--bind <user1> <user2>`, `--token-count <n>`, `--no-expiry`
+  - Added conditional logic and validation (e.g., `--bind` takes precedence over `--token-count`).
+
+- **Port Tunneling Integration**
+  - Integrated **Cloudflared** tunnel support directly in Python.
+  - Server auto-launches tunnels when `--host public` is passed.
+  - Added helper functions and installation instructions for Windows/Linux users.
+
+- **New Commands**
+  - `/list_users` — Lists currently connected users.
+  - `/help` — Now supports colored text using updated `aprint()`.
+
+### 🧩 UX Improvements
+
+- PSK input now hidden (password mode with asterisks).
+- Added color/styling for `safe_input` prompt text.
+- Tunnel users no longer see global chat messages while active.
+- Upgraded `aprint()` with color tag support for CLI formatting.
 
 ### 🛠 Improvements
 
-### 🔧 Changed
+- Added port argument parsing for both client and server.
+- Improved command-line validation and contextual help.
+- Revised internal logger to reduce prompt interference.
+- Cleaned up project structure for packaging and deployment.
 
-### 🧪 Experimental
+### 🧪 Experimental / 📈 Future
+
+- **Planned / In Progress**
+  - Add extended foreground and background color support for `safe_input`.
+  - Add runtime server-side input to generate tokens on demand (no restart required).
+  - Add `--reuse` flag for token reuse functionality.
+  - Tidy server/client logs and improve consistency.
+  - Review, clean, and refactor core modules.
+  - Explore Android support for mobile client deployment.
+  - Future tunneling provider support (Serveo, LocalTunnel).
+
+### 🧰 Internal Notes
+
+- All token and encryption flows manually verified.
+- MVP validated as of **2025-11-11**.
+- Candidate for **v0.5.0 Beta** release (first major public build).
 
 ---
 

@@ -3,6 +3,8 @@ import websockets
 import logging
 import base64
 from datetime import datetime
+import argparse
+
 from .helpers.tunnel_activity import TunnelActivityUtilsForOG
 
 from shared import encode_message, decode_message, make_register_message,make_system_request
@@ -18,7 +20,7 @@ from shared import CommandHandler
 
 # Importing ainput from the utility module
 # This utility function is used to handle asynchronous input without blocking the event loop.
-from prompt_toolkit import PromptSession
+from prompt_toolkit import HTML, PromptSession, print_formatted_text
 from prompt_toolkit.application import get_app_or_none
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.formatted_text import FormattedText
@@ -32,7 +34,19 @@ get_prompt_session = lambda: session
 # This utility function is used to handle asynchronous output without blocking the event loop.
 
 async def prompt_async_print(*args, **kwargs) -> None:
-        """Async print function using asyncio's run_in_executor with prompt_toolkit's patch_stdout"""
+        """Async print function using asyncio's run_in_executor with prompt_toolkit's patch_stdout
+        
+        Supports:
+        - Colored print with text wrapped in html tags containing names of the ansi colors.  
+            ex: `<ansired>hello world!</ansired>`  
+            - Available ANSI colors:  
+                - **Low intensity, dark.  (One or two components 0x80, the other 0x00.)**  
+                  - ansiblack, ansired, ansigreen, ansiyellow, ansiblue
+                  ansimagenta, ansicyan, ansigray  
+                - **High intensity, bright**  
+                  - ansibrightblack, ansibrightred, ansibrightgreen, ansibrightyellow
+                  ansibrightblue, ansibrightmagenta, ansibrightcyan, ansiwhite
+        """
 
         # Use patch_stdout to ensure that the output is flushed immediately
         # and does not interfere with the prompt_toolkit's input handling
@@ -41,7 +55,13 @@ async def prompt_async_print(*args, **kwargs) -> None:
             # This allows us to print without blocking the event loop
             # and ensures that the output is flushed immediately
             loop = asyncio.get_event_loop_policy().get_event_loop()
-            await loop.run_in_executor(None, print, *args, **kwargs)
+
+            # If there are any HTML tags, we can handle them
+            if any('<' in arg and '>' in arg for arg in args):
+                await loop.run_in_executor(None, lambda: print_formatted_text(HTML(*args, **kwargs)))
+            else:
+                # If no HTML tags are found, just print plain text
+                await loop.run_in_executor(None, lambda: print(*args, **kwargs))
 
 aprint = prompt_async_print
 
@@ -49,7 +69,8 @@ aprint = prompt_async_print
 command_handler = CommandHandler()
 
 # === Configuration === #
-SERVER_URI = "ws://localhost:8765"
+SERVER_URI = "wss://results-facial-stories-newer.trycloudflare.com"
+# "ws://localhost:8765"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -130,10 +151,10 @@ async def safe_input(prompt: str = "> ", password: bool = False, color: str = No
             \n Defaults to None.
 
     Raises:
-        KeyboardInterrupt: _description_
+        KeyboardInterrupt: When Ctrl^C is pressed. (Ctrl^C registers as a termination syscall in windows systems and in most linux systems)
 
     Returns:
-        str: _description_
+        str: the user input entered as a string
     """
     
     # Build colored prompt
@@ -214,7 +235,7 @@ async def cmd_exit(_: str):
 async def cmd_help(_: str):
     """ Command to display help information """
     help_text = (
-        "\nAvailable commands:\n"
+        "Available commands:\n"
         "/help - Show this help message\n"
         "/exit - Exit the chat client\n"
         "/whoami - Show your connection details (For now only username)\n"
@@ -226,7 +247,16 @@ async def cmd_help(_: str):
         "/exit_tunnel - Close an active private tunnel\n"
         "Type your message and press Enter to send it.\n"
     )
-    await aprint(help_text)
+
+    # Let's build colored help_text
+    # We need to split on '\n'
+    # Iterate from the second element
+    # Split on '-'
+    # Add html tags for the first element
+    # Join on '-'
+    # Join on '\n'
+    formatted_help_text = '\n'.join(['-'.join([f"<ansicyan>{command_text}</ansicyan>" if '/' in command_text else command_text for command_text in line.split('-')]) for line in help_text.splitlines()])
+    await aprint(formatted_help_text)
 
 async def cmd_whoami(_: str):
     """ Command to display the client's registered username """
@@ -770,7 +800,7 @@ async def receive_messages(websocket: websockets.ClientConnection):
 # Username Registration
 # ========================== #
 
-# Utility function to ask for the username
+# Utility method to ask for the username
 async def ask_for_username() -> str:
     """ 
     Asks the user for their username until a non-empty value is provided.
@@ -892,6 +922,34 @@ async def handle_username_registration(websocket) -> str | None:
             logger.error(f"\n Unexpected error: {e}")
             return None
 
+
+# Utility method to parse the arguments
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Oldie-Goldie's original client. Tightly integrated with Oldie-Goldie's secure server.  To serve, run: python -m client.chat --server-host {local|public}",
+        epilog=(
+        "Example:\n"
+        "  python myscript.py --token=-sdLr8H8FWy5fHq7lMW52A\n"
+        "  python myscript.py --token -- -sdLr8H8FWy5fHq7lMW52A\n\n"
+        "Note: Use '--' to safely pass arguments that begin with '-'."
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,  # keeps formatting & newlines
+    )
+
+    parser.add_argument('--server-host', choices=['local','public'], required=True, help="Server type: 'local' or 'public'")
+    parser.add_argument('--server-port', type=int, default=8765, help='Port to connect to (default: 8765)')
+    parser.add_argument('--url', help='Public Websocket URL (required if --server-host=public)')
+    parser.add_argument('--token', help="Authorization token (optional). Required if it is a protected server. Find out with the server provider. If it starts with '-', prefix it with '--' or use '=' syntax.")
+
+    args = parser.parse_args()
+
+    # --- validation ---
+    if args.server_host == "public" and not args.url:
+        parser.error('--url is required when --server-host=public')
+
+    return args
+
+
 # ========================== #
 # Main
 # ========================== #
@@ -900,12 +958,37 @@ async def main():
     1. send_messages
     2. receive_messages
     """
+
+    # Get the command line args
+    args = parse_args()
+
+    # --- build the connection url ---
+    if args.server_host == 'local':
+        uri=f"ws://localhost:{args.server_port}"
+    else:
+        uri = args.url.strip()
+        
+        # auto convert https:// -> wss:// (and http:// -> ws://)
+        if uri.startswith('https://'):
+            uri = 'wss://' + uri[len('https://'):]
+        elif uri.startswith('http://'):
+            uri = 'ws://' + uri[len('http://'):]
+    
+    # --- prepare headers if token is given ---
+    headers = [('Authorization', args.token)] if args.token else None
+    # if args.token:
+    #     headers['Authorization'] = args.token
+
     # Welcome banner
     await aprint("client\n",BANNER)
     global active_websocket, current_username
+
+    if headers:
+        logger.info(f"[main] Using Authorization header: {args.token[:6]}...")
+        
     
     # Connect to the websocket server via async context manager
-    async with websockets.connect(SERVER_URI) as websocket:
+    async with websockets.connect(uri, additional_headers=headers) as websocket:
         
         # Log the connection to the server
         logger.info("Connected to secure chat websocket server at ws://localhost:8765, Beginning username registration...")
@@ -975,4 +1058,6 @@ if __name__ == "__main__":
         logger.info("[root] Shutdown handled via cancellation.")
     except websockets.exceptions.ConnectionClosed:
         logger.info("[root] Connection Sucessfully Closed.")
+    except websockets.exceptions.InvalidStatus:
+        logger.info("[root] Invalid Auth Token")
     
