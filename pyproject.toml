@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "oldie-goldie"
-version = "0.5.1b0"
+version = "0.5.2b0"
 description = "Oldie Goldie — a peer-to-peer encrypted chat with tunnel and token-based access."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -59,7 +59,7 @@ og-client = "client.chat:cli"
 
 # Automated Sematic Versioning Helper
 [tool.bumpver]
-current_version = "0.5.1b0"
+current_version = "0.5.2b0"
 version_pattern = "MAJOR.MINOR.PATCH[PYTAGNUM]"
 commit_message = "🔖 Bump version {old_version} → {new_version}"
 tag_message = "v{new_version}"
