@@ -63,14 +63,14 @@ Nothing is logged, nothing persists — just you and your peer.
 2. **PSK (pre-shared key)** — share a private key to authenticate tunnels.
 
 ### Flow for Global Server
-
-0. Start the server in tunneling mode (`--host public`) to get a temporary public URL.
-1. Share that URL with your peer.
-2. Both register using pseudonyms (not real names).
-3. Use `/list_users` to find your peer.
-4. Send a connection request via `/connect @username`.
-5. Both enter the agreed **PSK** to authenticate the tunnel.
-6. If PSK mismatches, the session is terminated, and usernames are blocked.
+0. Install the required **Cloudflared** package.
+1. Start the server in tunneling mode (`--host public`) to get a temporary public URL.
+2. Share that URL with your peer.
+3. Both register using pseudonyms (not real names).
+4. Use `/list_users` to find your peer.
+5. Send a connection request via `/connect @username`.
+6. Both enter the agreed **PSK** to authenticate the tunnel.
+7. If PSK mismatches, the session is terminated, and usernames are blocked.
 
 > ⚠️ **Disclaimer**
 > Oldie-Goldie is **not** a social media or group chat platform.
@@ -102,6 +102,41 @@ og-client --server-host public --url <server-url> --token <token>
 ```
 
 ---
+
+## Cloudflared Installation on Ubuntu
+
+1. Download the Debian Package via github.
+
+```bash
+ wget https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
+```
+
+2. Install the debian package
+
+```bash
+sudo dpkg -i cloudflared-linux-amd64.deb
+```
+
+## Cloudflared Installation on Windows
+
+### Method-1
+
+1. Download the .exe file from github (or) follow this url [cloudflared_exe_download](https://github.com/cloudflare/cloudflared/releases/download/2025.11.1/cloudflared-windows-amd64.exe).
+
+2. Double click and install it and add the path in which cloudflared is installed to **Environment variables**.
+
+### Method-2
+
+1. Run the command prompt as **Administrator**.
+
+2. execute the following command. So it will also add path to environment variables.
+
+3. Make sure the PC is on latest version of either Windows 10/11.
+
+```bash
+winget install --id Cloudflare.cloudflared
+```
+
 
 ## ⚙️ Installation
 
