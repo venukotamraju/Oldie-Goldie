@@ -8,12 +8,14 @@ import argparse
 from .helpers.tunnel_activity import TunnelActivityUtilsForOG
 
 from shared import encode_message, decode_message, make_register_message,make_system_request
-from shared import BANNER
+from shared import version_banner
 from shared import SecureMethodsForOG
 
 # Importing the CommandHandler class from shared.command_handler module
 # This class is responsible for managing commands and their execution in the chat client.
 from shared import CommandHandler
+
+from importlib.metadata import version, PackageNotFoundError
 
 # Importing the async input utility function and async print utility function
 # These functions are used to handle asynchronous input and output in the chat client.
@@ -24,6 +26,7 @@ from prompt_toolkit import HTML, PromptSession, print_formatted_text
 from prompt_toolkit.application import get_app_or_none
 from prompt_toolkit.patch_stdout import patch_stdout
 from prompt_toolkit.formatted_text import FormattedText
+
 
 session = PromptSession()
 
@@ -941,6 +944,14 @@ def parse_args():
     parser.add_argument('--url', help='Public Websocket URL (required if --server-host=public)')
     parser.add_argument('--token', help="Authorization token (optional). Required if it is a protected server. Find out with the server provider. If it starts with '-', prefix it with '--' or use '=' syntax.")
 
+    # 👇 Add version flag
+    try:
+        pkg_version = version("oldie-goldie")
+    except PackageNotFoundError:
+        pkg_version = "0.0.0-dev"
+    
+    parser.add_argument("--version", action="version", version=f"Oldie Goldie {pkg_version}")
+
     args = parser.parse_args()
 
     # --- validation ---
@@ -980,7 +991,7 @@ async def main():
     #     headers['Authorization'] = args.token
 
     # Welcome banner
-    await aprint("client\n",BANNER)
+    await aprint(version_banner(app_name='Client'))
     global active_websocket, current_username
 
     if headers:
@@ -1060,4 +1071,10 @@ if __name__ == "__main__":
         logger.info("[root] Connection Sucessfully Closed.")
     except websockets.exceptions.InvalidStatus:
         logger.info("[root] Invalid Auth Token")
-    
+
+def cli():
+    """Entry point for 'og-client' command."""
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("[og-client] KeyboardInterrupt received. Exiting...")

@@ -6,14 +6,14 @@ import websockets.legacy.server
 from websockets.legacy.server import WebSocketServerProtocol
 import logging
 from shared import encode_message, decode_message, make_register_message, make_user_disconnected_message, make_system_response
-from shared import BANNER
+from shared import SYMBOL_BANNER, version_banner
 import argparse
 import sys
 import shutil
 import subprocess
 from .helpers.tunnel_manager import TunnelManager
 import secrets
-from http import HTTPStatus
+from importlib.metadata import version, PackageNotFoundError
 
 # Logging configuration and setup
 # This will log messages to the console with a specific format
@@ -644,6 +644,15 @@ def parse_args():
     p.add_argument('--bind', nargs='+', help='optional list of usernames to bind tokens to (only when --invite-token used)')
     p.add_argument('--token-count', type=int, help='how many tokens to create per bound username or globally')
     p.add_argument('--no-expiry', action='store_true', help='remove expiration of tokens. The tokens will however be discarded when server is closed.')
+    
+    # 👇 Add version flag
+    try:
+        pkg_version = version("oldie-goldie")
+    except PackageNotFoundError:
+        pkg_version = "0.0.0-dev"
+    
+    p.add_argument("--version", action="version", version=f"Oldie Goldie {pkg_version}")
+    
     return p.parse_args()
 
 def validate_args(args: argparse.Namespace):
@@ -835,10 +844,11 @@ async def main():
     # Add support for command line arguments to take in an optional port number
     args = parse_args()
     validate_args(args=args)
-    print('[main] args: ', args)
+    logger.debug('[main] args: ', args)
 
     # welcome banner
-    print('server\n', BANNER)
+    app_name = 'Protected Server' if args.invite_token else 'Unprotected Server'
+    print(version_banner(app_name=app_name))
 
     tunnel_mgr = None
     if args.host == 'public':
@@ -848,7 +858,7 @@ async def main():
         else:
             url = await wait_for_tunnel_url(tunnel_mgr, timeout=8.0)
             if url:
-                print(f"Public ephemeral URL: {url}")
+                print(f"\nPublic ephemeral URL: {url}\n")
             else:
                 print("⚠️ Cloudflared started but URL not yet available (continuing anyway).")
     
@@ -871,3 +881,10 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.warning("[__main__] KeyboardInterrupt received. Server shutting down.")
+
+def cli():
+    """Entry point for 'og-client' command."""
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("[og-client] KeyboardInterrupt received. Exiting...")

@@ -1,0 +1,3 @@
+[console_scripts]
+og-client = client.chat:cli
+og-server = server.server:cli
