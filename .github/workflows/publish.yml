@@ -37,14 +37,14 @@ jobs:
         run: ls -l dist
 
       - name: Upload to TestPyPI (pre-releases)
-        if: ${{ contains(github.ref, 'b') || contains(github.ref, 'a') || contains(github.ref, 'rc') }}
+        if: ${{ contains(github.ref_name, 'b') || contains(github.ref_name, 'a') || contains(github.ref_name, 'rc') }}
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.TEST_PYPI_API_TOKEN }}
         run: python -m twine upload --verbose --repository testpypi dist/*
 
       - name: Upload to PyPI (stable releases)
-        if: ${{ !contains(github.ref, 'b') && !contains(github.ref, 'a') && !contains(github.ref, 'rc') }}
+        if: ${{ !contains(github.ref_name, 'b') && !contains(github.ref_name, 'a') && !contains(github.ref_name, 'rc') }}
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
