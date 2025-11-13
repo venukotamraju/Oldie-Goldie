@@ -1,6 +1,6 @@
 # 🕊️ Oldie-Goldie
 
-*A Being Human Cult (BHC) Initiative*  
+
 
 > **A self-hostable, peer-to-peer encrypted chat system**
 > with tunnel-based connections and token-authenticated access.
