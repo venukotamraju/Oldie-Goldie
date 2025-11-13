@@ -63,6 +63,7 @@ Nothing is logged, nothing persists — just you and your peer.
 2. **PSK (pre-shared key)** — share a private key to authenticate tunnels.
 
 ### Flow for Global Server
+
 0. Install the required **Cloudflared** package.
 1. Start the server in tunneling mode (`--host public`) to get a temporary public URL.
 2. Share that URL with your peer.
@@ -247,6 +248,8 @@ If you’d like to contribute, please:
 4. Submit a PR
 
 Or open an [issue](https://github.com/venukotamraju/Oldie-Goldie/issues) to discuss ideas.
+
+For more detailed developer setup and contributing guidelines, see [CONTRIBUTING.md](CONTRIBUTING.md)
 
 ---
 

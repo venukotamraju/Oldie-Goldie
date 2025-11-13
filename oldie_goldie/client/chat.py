@@ -1002,7 +1002,7 @@ async def main():
     async with websockets.connect(uri, additional_headers=headers) as websocket:
         
         # Log the connection to the server
-        logger.info("Connected to secure chat websocket server at ws://localhost:8765, Beginning username registration...")
+        logger.info(f"Connected to secure chat websocket server at {uri}, Beginning username registration...")
 
         active_websocket = websocket
         
