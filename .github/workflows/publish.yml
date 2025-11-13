@@ -41,7 +41,7 @@ jobs:
         env:
           TWINE_USERNAME: __token__
           TWINE_PASSWORD: ${{ secrets.TEST_PYPI_TOKEN }}
-        run: python -m twine upload --repository testpypi dist/*
+        run: python -m twine upload --verbose --repository testpypi dist/*
 
       - name: Upload to PyPI (stable releases)
         if: ${{ !contains(github.ref, 'b') && !contains(github.ref, 'a') && !contains(github.ref, 'rc') }}
