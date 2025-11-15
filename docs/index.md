@@ -1,13 +1,18 @@
-# 🧠 Oldie Goldie
+# 🕊️ Oldie-Goldie — Private, Peer-to-Peer Encrypted Communication
 
-Welcome to the **Oldie Goldie** documentation — a self-hostable, peer-to-peer encrypted chat built for privacy and control.
+> for new users — screenshots + basic usage
 
-## ✨ Features
+Oldie-Goldie creates **temporary**, **invite-controlled**, **end-to-end encrypted** chat tunnels between trusted peers — without cloud servers, accounts, or logs.
 
-- End-to-end encrypted tunnels  
-- Token-based access control  
-- Server & client command-line tools (`og-server`, `og-client`)  
-- Cloudflared-based public tunnel support  
-- Easy setup & teardown — zero persistence
+This documentation will help you:
 
-[Get Started →](usage.md)
+- Install and set up Oldie-Goldie
+- Run secure one-to-one communication
+- Understand tokens, tunnels and trust model
+- Develop and contribute to the project
+
+🚀 **If you're new, start with:**  
+👉 [Usage Guide](usage.md)
+
+🔧 **If you're here to contribute, see:**  
+👉 [Developer Guide](developer-guide.md)

@@ -18,3 +18,7 @@ tests/
 
 # Ignore artifacts
 **/dist/
+
+# Ignore static site files generated my mkdocs
+
+**/site/

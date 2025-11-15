@@ -118,6 +118,8 @@ og-client --server-host public --url <server-url> --token <token>
 sudo dpkg -i cloudflared-linux-amd64.deb
 ```
 
+---
+
 ## Cloudflared Installation on Windows
 
 ### Method-1
@@ -138,12 +140,64 @@ sudo dpkg -i cloudflared-linux-amd64.deb
 winget install --id Cloudflare.cloudflared
 ```
 
+---
 
 ## ⚙️ Installation
+
+Oldie-Goldie supports **Python 3.9+** on **Linux, macOS, and Windows**.
+
+### 📌 Standard Install
 
 ```bash
 pip install oldie-goldie
 ```
+
+#### 🧰 If pip is not recognized
+
+```bash
+python -m pip install oldie-goldie
+
+# or
+
+python3 -m pip install oldie-goldie
+```
+
+#### ✨ (Optional) Add pip to PATH
+
+|OS|How|
+|--|--|
+|Windows|Add %LocalAppData%\Programs\Python\PythonXY\Scripts\ to PATH|
+|Linux/macOS|Add ~/.local/bin to PATH|
+
+#### ⬆️ Upgrade
+
+```bash
+pip install --upgrade oldie-goldie
+```
+
+### 🛠 Install from Source (for developers)
+
+```bash
+git clone https://github.com/venukotamraju/Oldie-Goldie.git
+cd Oldie-Goldie
+python -m pip install -r requirements.txt
+pip install -e .
+```
+
+### 🧿 Troubleshooting
+
+|Issue|Fix|
+|-----|---|
+|pip: comman not found|Use python -m pip or add pip to PATH|
+|AttributeError: drain / asyncio mismatch|Upgrade Python to 3.10+ and reinstall|
+|ModuleNotFoundError after install|Ensure you're using the same interpreter that installed the package|
+
+---
+
+## 📚 Documentation
+
+Full usage guide · CLI examples · Architecture · Contribution docs
+🔗 https://venukotamraju.github.io/Oldie-Goldie
 
 ---
 
@@ -236,6 +290,8 @@ If you’d like to support development or buy the maintainers a coffee:
 * 📢 **Share the project! —** word of mouth helps more than you think.
 
 Your support keeps the project independent and privacy-focused. 🙏
+
+---
 
 ## 🤝 Contributing
 
