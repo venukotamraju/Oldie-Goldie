@@ -394,7 +394,7 @@ For more detailed developer setup and contributing guidelines, see [CONTRIBUTING
 
 ## 📜 License
 
-Licensed under the [MIT License](LICENSE).  
+Licensed under the [APACHE 2.0](LICENSE).  
 Copyright © 2025  
 **[Venu Kotamraju](https://github.com/venukotamraju)**, under the **Being Human Cult (BHC)** initative.
 
