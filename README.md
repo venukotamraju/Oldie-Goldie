@@ -7,7 +7,9 @@
 
 [![PyPI Version](https://img.shields.io/pypi/v/oldie-goldie)](https://pypi.org/project/oldie-goldie/)
 [![Python Versions](https://img.shields.io/pypi/pyversions/oldie-goldie)](https://pypi.org/project/oldie-goldie/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+![Python Versions](https://img.shields.io/badge/Python-3.10%20|%203.11%20|%203.12%20|%203.13-brightgreen?logo=python)
+![Python 3.14](https://img.shields.io/badge/3.14-not%20yet%20supported-red)
+[![License: Apache](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Issues](https://img.shields.io/github/issues/venukotamraju/Oldie-Goldie)](https://github.com/venukotamraju/Oldie-Goldie/issues)
 [![Last Commit](https://img.shields.io/github/last-commit/venukotamraju/Oldie-Goldie)](https://github.com/venukotamraju/Oldie-Goldie/commits/main)
 
@@ -144,7 +146,88 @@ winget install --id Cloudflare.cloudflared
 
 ## ⚙️ Installation
 
-Oldie-Goldie supports **Python 3.9+** on **Linux, macOS, and Windows**.
+Oldie-Goldie supports *Python 3.10–3.13* on *Linux, macOS, and Windows*.
+
+> *Note:* Python *3.14* currently has limited third-party wheel support for critical cryptography dependencies. See “Python Compatibility” below.
+
+---
+
+### 🐍 Python Compatibility
+
+#### Supported Versions
+
+✔ Python *3.10*  
+✔ Python *3.11*  
+✔ Python *3.12*  
+✔ Python *3.13*
+
+#### ⚠️ Python 3.14 Notice
+
+Python *3.14* is very new, and several upstream dependencies (such as `cffi`, which is required by `cryptography`) have *not yet released pre-built wheels* for it.
+
+This may cause:
+
+* pip attempting to *compile C extensions from source*
+* C/C++ build tool errors, especially on Windows
+* installation failure even with build tools installed
+
+Oldie-Goldie will officially support Python 3.14 *once upstream libraries ship compatible wheels on PyPI*.
+
+---
+
+### 🔧 Workarounds & Alternatives (No extra Python installations required)
+
+#### *A. Use a Version Manager (Recommended)*
+
+If you want to keep Python 3.14 as your system interpreter while running Oldie-Goldie in a fully isolated environment:
+
+##### Using pyenv (Linux/macOS/WSL)
+
+```bash
+pyenv install 3.13.1
+pyenv local 3.13.1
+```
+
+##### Using Conda (Windows/Linux/macOS)
+
+```bash
+conda create -n og-env python=3.13
+conda activate og-env
+```
+
+These tools do not touch your system Python and are safe, reversible, and developer-friendly.
+
+---
+
+#### *B. Why Python 3.14 Support Is Delayed*
+
+Oldie-Goldie depends on cryptographic packages that rely on compiled C extensions.  
+Python 3.14 introduced ABI/runtime changes that require the ecosystem to release updated wheels.
+
+We are waiting for 3.14 wheels for:
+
+* `cffi`
+* `cryptography`
+* `websockets`
+* related transitive dependencies
+
+Once these are published, 3.14 will be enabled automatically.
+
+---
+
+#### *C. Roadmap for Python 3.14 Support*
+
+Oldie-Goldie will add Python 3.14 support when:
+
+1. All cryptography packages publish Python 3.14 wheels  
+2. Installation succeeds without requiring a compiler  
+3. Windows/Linux/macOS wheels are available on PyPI  
+4. Runtime tests pass without regressions  
+
+Progress tracked here:  
+🔗 https://github.com/venukotamraju/Oldie-Goldie/issues
+
+---
 
 ### 📌 Standard Install
 

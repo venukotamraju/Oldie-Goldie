@@ -7,7 +7,7 @@ name = "oldie-goldie"
 version = "0.5.8b0"
 description = "Oldie Goldie — a peer-to-peer encrypted chat with tunnel and token-based access."
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.10,<3.14"
 license = { file = "LICENSE" }
 authors = [
   { name = "Venu kotamraju", email = "kotamraju.venugopal@gmail.com" }
@@ -19,9 +19,10 @@ maintainers = [
 keywords = ["chat", "encryption", "tunnel", "websocket", "secure"]
 classifiers = [
   "Development Status :: 4 - Beta",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
-  "Programming Language :: Python :: 3.14",
   "Topic :: Communications :: Chat",
   "License :: OSI Approved :: MIT License",
   "Intended Audience :: Developers",
