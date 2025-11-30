@@ -6,16 +6,36 @@ edit_uri: edit/main/docs/
 
 theme:
   name: material
+  favicon: assets/images/favicon/favicon_io/favicon.ico
+  logo: assets/images/oldie-goldie-logo.svg
   palette:
-    - scheme: default
-      primary: amber
-      accent: deep purple
+    - scheme: slate           # Dark mode as default
+      primary: black
+      accent: red
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+    - scheme: default         # Light mode option
+      primary: green
+      accent: green
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
   features:
     - navigation.expand
     - navigation.top
+    - navigation.instant
+    - navigation.tracking
+    - navigation.footer
     - toc.integrate
-    - content.action.edit
     - content.code.copy
+    - content.action.edit
+    - content.tabs.link
+    - content.code.annotate
+    - search.suggest
+    - search.highlight
+
+copyright: Copyright &copy; 2025 - 2026 <a href="https://venukotamraju.vercel.app" target="_blank">Venu kotamraju</a>, under the <a href="https://beinghumancult.blogspot.com" target="_blank">Being Human Cult (BHC)</a> initiative.
 
 plugins:
   - search
@@ -23,14 +43,24 @@ plugins:
 
 markdown_extensions:
   - admonition
+  - footnotes
+  - def_list
   - codehilite
   - toc:
       permalink: true
-  - footnotes
-  - def_list
+  - pymdownx.superfences
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.magiclink
+  - pymdownx.emoji:
+      emoji_generator: !!python/name:pymdownx.emoji.to_svg
+  - pymdownx.tasklist:
+      custom_checkbox: true
 
 nav:
   - Home: index.md
   - Usage: usage.md
   - Developer Guide: developer-guide.md
   - Changelog: changelog.md
+  - Python Compatibility: python-compatibility.md
+

@@ -4,6 +4,7 @@
 import json
 from datetime import datetime
 import base64
+from typing import Any
 from .crypto.encryption_handlers import EncryptionUtilsForOG
 
 # Protocol Version
@@ -25,10 +26,10 @@ PROTOCOL_VERSION = "1.0"
 def encode_message(
         sender: str, 
         message: str, 
-        timestamp = None, 
+        timestamp:str | None = None, 
         type: str = 'chat_message', 
-        session_key: bytes = None,
-        **kwargs) -> str:
+        session_key: bytes | None = None,
+        **kwargs: Any) -> str:
     """
     Encodes a chat message (or other type) into a JSON string with support for extra fields.
     If session_key is provided, encrypts the JSON string and returns an 'encrypted_message' wrapper instead.
@@ -38,10 +39,6 @@ def encode_message(
     # Validate inputs
     if not sender or not message:
         raise ValueError("Sender and message cannot be empty.")
-    if not isinstance(sender, str) or not isinstance(message, str):
-        raise TypeError("Sender and message must be strings.")
-    if timestamp and not isinstance(timestamp, str):
-        raise TypeError("Timestamp must be a string or None.")
     if len(sender) > 50:
         raise ValueError("Sender name cannot exceed 50 characters.")
     if len(message) > 500:
@@ -85,7 +82,7 @@ def encode_message(
 
 # Function to decode a chat message
 # Takes a JSON string and returns a dictionary
-def decode_message(message_str: str, session_key: bytes = None) -> dict:
+def decode_message(message_str: str | bytes, session_key: bytes | None = None) -> dict[str, str]:
     """
     Decodes a chat message from a JSON string into a dictionary.
     If the message is 'encrypted_message' and session_key is provided,
@@ -193,7 +190,7 @@ def make_system_request(need: str, username: str) -> str:
         'timestamp': datetime.now().astimezone().isoformat()        
     })
 
-def make_system_response(res_obj: any = None, res_need: str = None):
+def make_system_response(res_obj: Any = None, res_need: str | None = None):
     """Respond to the system request with this structure
     """
     return json.dumps({

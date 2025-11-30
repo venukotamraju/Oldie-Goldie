@@ -2,23 +2,90 @@
 
 *A Being Human Cult (BHC) Initiative*  
 
-> **A self-hostable, peer-to-peer encrypted chat system**
-> with tunnel-based connections and token-authenticated access.
+> **A self-hostable, peer-to-peer encrypted chat system  
+with ephemeral tunnels, reusable invite tokens, and zero logs.**
 
 [![PyPI Version](https://img.shields.io/pypi/v/oldie-goldie)](https://pypi.org/project/oldie-goldie/)
 [![Python Versions](https://img.shields.io/pypi/pyversions/oldie-goldie)](https://pypi.org/project/oldie-goldie/)
-![Python Versions](https://img.shields.io/badge/Python-3.10%20|%203.11%20|%203.12%20|%203.13-brightgreen?logo=python)
 ![Python 3.14](https://img.shields.io/badge/3.14-not%20yet%20supported-red)
 [![License: Apache](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+![Status](https://img.shields.io/badge/status-stable-blue)
+![Cloudflared](https://img.shields.io/badge/cloudflared-auto--managed-ec5600)
+![Security](https://img.shields.io/badge/encryption-end--to--end-green)
 [![Issues](https://img.shields.io/github/issues/venukotamraju/Oldie-Goldie)](https://github.com/venukotamraju/Oldie-Goldie/issues)
 [![Last Commit](https://img.shields.io/github/last-commit/venukotamraju/Oldie-Goldie)](https://github.com/venukotamraju/Oldie-Goldie/commits/main)
 
 ---
 
+## 📘 Table of Contents
+
+- [✨ Core Features](#-core-features)
+- [⚡ TL;DR (Quick Start)](#-tldr-quick-start)
+- [🌐 What is Oldie-Goldie?](#-what-is-oldie-goldie)
+- [💡 Why I Built It](#-why-i-built-it)
+- [🧭 Intended Usage](#-intended-usage)
+- [🧱 Guard Rails and Trust Model](#-guard-rails-and-trust-model)
+- [☁️ Cloudflared Handling (Automatic)](#️-cloudflared-handling-automatic)
+- [⚙️ Installation](#️-installation)
+- [🐍 Python Compatibility](#-python-compatibility)
+- [🚀 Usage](#-usage)
+- [📚 Documentation](#-documentation)
+- [🧾 Changelog](#-changelog)
+- [🧪 Future Roadmap](#-future-roadmap)
+- [🌿 About Being Human Cult (BHC)](#-about-being-human-cult-bhc)
+- [☕ Support the Project](#-support-the-project)
+- [🤝 Contributing](#-contributing)
+- [📜 License](#-license)
+- [💬 Connect](#-connect)
+- [🧡 A Note from the Author](#-a-note-from-the-author)
+- [❤️ Author](#️-author)
+
+---
+
+## ✨ Core Features
+
+- 🔐 **Encrypted peer-to-peer tunnels**
+- 🪪 **Token-based access control** (single-use, bound, or reusable)
+- 🔁 **Token reuse support (`--reuse`)**
+- 🌐 **Automatic Cloudflared tunneling** (no installation required)
+- 🧳 **Zero logs — nothing stored, nothing retained**
+- 👥 **Ephemeral one-to-one private sessions**
+- 🧩 **Cross-platform** (Linux · macOS · Windows)
+- 🪶 **Lightweight Python CLI**
+- 🕵️ **Privacy-first, open-source, auditable**
+
+---
+
+## ⚡ TL;DR (Quick Start)
+
+**Start a public server (auto-tunnel + tokens):**
+
+```bash
+og-server --host public --invite-token --token-count 1 --reuse
+```
+
+**Client connects:**
+
+```bash
+og-client --server-host public --url <server-url> --token <token>
+```
+
+**Initiate a private encrypted tunnel:**
+
+```bash
+/connect @peer
+```
+
+**Enter your PSK → Tunnel established.**
+
+---
+
 ## 🌐 What is Oldie-Goldie?
 
-**Oldie-Goldie** is an **on-demand**, **on-the-fly**, **self-hostable**, peer-to-peer encrypted chat system.
-It provides **ephemeral tunnel-based connections** and **token-authenticated access**, enabling private, auditable, and serverless-style conversations between trusted peers.
+**Oldie-Goldie** is an **on-demand**, **peer-to-peer encrypted**, **self-hostable** chat system for people who want privacy without relying on centralized services.
+
+You spin up a temporary server → share a URL + token → chat → destroy everything.  
+Nothing persists. Nothing leaks.
 
 ---
 
@@ -34,23 +101,23 @@ Even when encryption is claimed, the *closed-source* nature of these apps makes 
 
 I wanted a fallback — a chat app that was:
 
-* **Open source** and auditable
-* **Truly self-hostable**
-* **Peer-to-peer encrypted**, with **no middleman**
+- **Open source** and auditable
+- **Truly self-hostable**
+- **Peer-to-peer encrypted**, with **no middleman**
 
 So I built **Oldie-Goldie**, and it became my trusted space for private discussions.
 
 ---
 
-## 🧠 The Solution
+### 🧠 The Solution
 
 Oldie-Goldie gives you:
 
-* **Direct, secure, ephemeral connections**
-* **No cloud storage**
-* **No accounts**
-* **End-to-end encrypted tunnels**
-* **Invite-token based access control**
+- **Direct, secure, ephemeral connections**
+- **No cloud storage**
+- **No accounts**
+- **End-to-end encrypted tunnels**
+- **Invite-token based access control**
 
 You spin up a temporary server, share a link + token with your peer, chat securely, and shut it all down when done.
 Nothing is logged, nothing persists — just you and your peer.
@@ -66,14 +133,17 @@ Nothing is logged, nothing persists — just you and your peer.
 
 ### Flow for Global Server
 
-0. Install the required **Cloudflared** package.
-1. Start the server in tunneling mode (`--host public`) to get a temporary public URL.
-2. Share that URL with your peer.
-3. Both register using pseudonyms (not real names).
-4. Use `/list_users` to find your peer.
-5. Send a connection request via `/connect @username`.
-6. Both enter the agreed **PSK** to authenticate the tunnel.
-7. If PSK mismatches, the session is terminated, and usernames are blocked.
+> **Update (v0.6.0):**
+> Oldie-Goldie now **automatically downloads and manages Cloudflared** using `pycloudflared`.  
+> No installation. No PATH setup. Nothing manual.
+
+1. Start the server (`--host public`)
+2. Share the generated public URL
+3. Register pseudonyms
+4. `/list_users` to find your peer
+5. `/connect @username`
+6. Enter the shared **PSK**
+7. The server relays traffic blindly over the encrypted tunnel
 
 > ⚠️ **Disclaimer**
 > Oldie-Goldie is **not** a social media or group chat platform.
@@ -92,10 +162,16 @@ Nothing is logged, nothing persists — just you and your peer.
 
 ### 🔐 Example: Token-Based Secure Server
 
-Generate tokens for two users:
+Generate bound tokens:
 
 ```bash
 og-server --host public --invite-token --bind alice bob
+```
+
+Generate reusable tokens (v0.6.0):
+
+```bash
+og-server --host public --invite-token --bind alice bob --reuse
 ```
 
 Then connect:
@@ -106,41 +182,27 @@ og-client --server-host public --url <server-url> --token <token>
 
 ---
 
-## Cloudflared Installation on Ubuntu
+## ☁️ Cloudflared Handling (Automatic)
 
-1. Download the Debian Package via github.
+Oldie-Goldie (v0.6.0) introduces **automatic integration** via `pycloudflared`.
 
-```bash
- wget https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64.deb
-```
+### ✔ No manual installation needed  
 
-2. Install the debian package
+### ✔ No PATH configuration  
 
-```bash
-sudo dpkg -i cloudflared-linux-amd64.deb
-```
+### ✔ Works on Windows, Linux, macOS, and virtual environments  
 
----
+### ✔ Cloudflared binary is downloaded automatically and sandboxed
 
-## Cloudflared Installation on Windows
-
-### Method-1
-
-1. Download the .exe file from github (or) follow this url [cloudflared_exe_download](https://github.com/cloudflare/cloudflared/releases/download/2025.11.1/cloudflared-windows-amd64.exe).
-
-2. Double click and install it and add the path in which cloudflared is installed to **Environment variables**.
-
-### Method-2
-
-1. Run the command prompt as **Administrator**.
-
-2. execute the following command. So it will also add path to environment variables.
-
-3. Make sure the PC is on latest version of either Windows 10/11.
+This significantly simplifies public tunneling:
 
 ```bash
-winget install --id Cloudflare.cloudflared
+og-server --host public
 ```
+
+Done. Tunneling works out of the box.
+
+> Manual installation instructions are now unnecessary and removed.
 
 ---
 
@@ -148,86 +210,7 @@ winget install --id Cloudflare.cloudflared
 
 Oldie-Goldie supports *Python 3.10–3.13* on *Linux, macOS, and Windows*.
 
-> *Note:* Python *3.14* currently has limited third-party wheel support for critical cryptography dependencies. See “Python Compatibility” below.
-
----
-
-### 🐍 Python Compatibility
-
-#### Supported Versions
-
-✔ Python *3.10*  
-✔ Python *3.11*  
-✔ Python *3.12*  
-✔ Python *3.13*
-
-#### ⚠️ Python 3.14 Notice
-
-Python *3.14* is very new, and several upstream dependencies (such as `cffi`, which is required by `cryptography`) have *not yet released pre-built wheels* for it.
-
-This may cause:
-
-* pip attempting to *compile C extensions from source*
-* C/C++ build tool errors, especially on Windows
-* installation failure even with build tools installed
-
-Oldie-Goldie will officially support Python 3.14 *once upstream libraries ship compatible wheels on PyPI*.
-
----
-
-### 🔧 Workarounds & Alternatives (No extra Python installations required)
-
-#### *A. Use a Version Manager (Recommended)*
-
-If you want to keep Python 3.14 as your system interpreter while running Oldie-Goldie in a fully isolated environment:
-
-##### Using pyenv (Linux/macOS/WSL)
-
-```bash
-pyenv install 3.13.1
-pyenv local 3.13.1
-```
-
-##### Using Conda (Windows/Linux/macOS)
-
-```bash
-conda create -n og-env python=3.13
-conda activate og-env
-```
-
-These tools do not touch your system Python and are safe, reversible, and developer-friendly.
-
----
-
-#### *B. Why Python 3.14 Support Is Delayed*
-
-Oldie-Goldie depends on cryptographic packages that rely on compiled C extensions.  
-Python 3.14 introduced ABI/runtime changes that require the ecosystem to release updated wheels.
-
-We are waiting for 3.14 wheels for:
-
-* `cffi`
-* `cryptography`
-* `websockets`
-* related transitive dependencies
-
-Once these are published, 3.14 will be enabled automatically.
-
----
-
-#### *C. Roadmap for Python 3.14 Support*
-
-Oldie-Goldie will add Python 3.14 support when:
-
-1. All cryptography packages publish Python 3.14 wheels  
-2. Installation succeeds without requiring a compiler  
-3. Windows/Linux/macOS wheels are available on PyPI  
-4. Runtime tests pass without regressions  
-
-Progress tracked here:  
-🔗 https://github.com/venukotamraju/Oldie-Goldie/issues
-
----
+> **Note:** Python 3.14 is currently **not supported** due to missing upstream wheels (`cffi`, `cryptography`, etc.). See “[Python Compatibility](#-python-compatibility)” below.
 
 ### 📌 Standard Install
 
@@ -277,10 +260,22 @@ pip install -e .
 
 ---
 
-## 📚 Documentation
+## 🐍 Python Compatibility
 
-Full usage guide · CLI examples · Architecture · Contribution docs
-🔗 https://venukotamraju.github.io/Oldie-Goldie
+### Supported Versions
+
+✔ Python *3.10*  
+✔ Python *3.11*  
+✔ Python *3.12*  
+✔ Python *3.13*
+
+### Not Yet Supported
+
+❌ **Python 3.14**  
+→ Missing upstream wheels (`cryptography`, `cffi`)  
+→ Support will be added automatically once dependencies publish them
+
+Workarounds (pyenv, conda, etc.) included in [documentation](https://venukotamraju.github.io/Oldie-Goldie/python-compatibility/#workarounds-for-developers).
 
 ---
 
@@ -294,7 +289,7 @@ Full usage guide · CLI examples · Architecture · Contribution docs
 og-server --host local
 ```
 
-#### Public (with Tunnel)
+#### Public (with Automatic Tunnel)
 
 ```bash
 og-server --host public
@@ -310,6 +305,12 @@ og-server --host public --invite-token --token-count 2
 
 ```bash
 og-server --host public --invite-token --bind alice bob
+```
+
+#### Reusable Tokens (New in v0.6.0)
+
+```bash
+og-server --host public --invite-token --bind alice bob --reuse
 ```
 
 ---
@@ -336,6 +337,13 @@ og-client --server-host public --url <server-url> --token <token>
 
 ---
 
+## 📚 Documentation
+
+Full usage guide · CLI examples · Architecture · Python compatibility · Changelog  
+🔗 <https://venukotamraju.github.io/Oldie-Goldie>
+
+---
+
 ## 🧾 Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for the full version history and upcoming features.
@@ -344,12 +352,11 @@ See [CHANGELOG.md](CHANGELOG.md) for the full version history and upcoming featu
 
 ## 🧪 Future Roadmap
 
-* Extend safe_input with foreground/background input support
-* Enable server-side dynamic token generation
-* Add `--reuse` flag for token reuse
-* Tidy server and client logs
-* Improve modularity and developer docs
-* Add Android support
+- Extend `safe_input` with foreground/background input support
+- Enable server-side dynamic token generation
+- Tidy client logs
+- Add Android support
+- Architectural docs expansion
 
 ---
 
@@ -367,10 +374,10 @@ Learn more: [https://beinghumancult.blogspot.com](https://beinghumancult.blogspo
 Oldie-Goldie is free, open-source, and maintained with care by volunteers.
 If you’d like to support development or buy the maintainers a coffee:
 
-* 💖 **Buy Me a Coffee:** (link coming soon)
-* 💰 **GitHub Sponsors:** (link coming soon)
-* 🪙 **Ko-fi:** (link coming soon)
-* 📢 **Share the project! —** word of mouth helps more than you think.
+- 💖 **Buy Me a Coffee:** (link coming soon)
+- 💰 **GitHub Sponsors:** (link coming soon)
+- 🪙 **Ko-fi:** (link coming soon)
+- 📢 **Share the project! —** word of mouth helps more than you think.
 
 Your support keeps the project independent and privacy-focused. 🙏
 
@@ -396,27 +403,27 @@ For more detailed developer setup and contributing guidelines, see [CONTRIBUTING
 
 Licensed under the [APACHE 2.0](LICENSE).  
 Copyright © 2025  
-**[Venu Kotamraju](https://github.com/venukotamraju)**, under the **Being Human Cult (BHC)** initative.
+**[Venu Kotamraju](https://github.com/venukotamraju)**, under the **[Being Human Cult (BHC)](https://beinghumancult.blogspot.com)** initative.
 
 ---
 
 ## 💬 Connect
 
-* **GitHub** → [Oldie-Goldie](https://github.com/venukotamraju/Oldie-Goldie)
-* **PyPI** → [oldie-goldie](https://pypi.org/project/oldie-goldie/)
-* **LinkedIn** → *[Link coming soon...]*
-* **Blog** → [Being Human Cult](https://beinghumancult.blogspot.com)
+- **GitHub** → [Oldie-Goldie](https://github.com/venukotamraju/Oldie-Goldie)
+- **PyPI** → [oldie-goldie](https://pypi.org/project/oldie-goldie/)
+- **LinkedIn** → *[Link coming soon...]*
+- **Blog** → [Being Human Cult](https://beinghumancult.blogspot.com)
 
 ---
 
-### 🧡 A Note from the Author
+## 🧡 A Note from the Author
 
 > I built Oldie-Goldie to reclaim digital privacy.
 > It’s not about hiding — it’s about owning your data and choosing who gets to see it.
 
 ---
 
-### ❤️ Author
+## ❤️ Author
 
 **Venu Kotamraju**  
 [kotamraju.venugopal@gmail.com](kotamraju.venugopal@gmail.com)  

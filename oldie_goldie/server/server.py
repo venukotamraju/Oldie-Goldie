@@ -1,12 +1,10 @@
 import asyncio
 import time
-from typing import Optional
+from typing import Any, Optional
 import websockets
-import websockets.legacy.server
-from websockets.legacy.server import WebSocketServerProtocol
 import logging
 from shared import encode_message, decode_message, make_register_message, make_user_disconnected_message, make_system_response
-from shared import SYMBOL_BANNER, version_banner
+from shared import version_banner
 import argparse
 import sys
 import shutil
@@ -31,23 +29,23 @@ logger = logging.getLogger(__name__)
 # This will hold all connected clients' websockets
 # The keys are usernames and the values are the respective websocket connections
 # This allows us to keep track of connected users and their respective websockets
-user_registry_by_id: dict[str, websockets.legacy.server.WebSocketServerProtocol] = {}
+user_registry_by_id: dict[str, websockets.ServerConnection] = {}
 
 # This will hold the mapping of websockets to usernames
 # This allows us to quickly find the username associated with a given websocket connection
-user_registry_by_websocket: dict[websockets.legacy.server.WebSocketServerProtocol, str] = {}
+user_registry_by_websocket: dict[websockets.ServerConnection, str] = {}
 
 # Blocked usernames set (non-persistent)
 blocked_usernames: set[str] = set()
 
 # Pending tunnel validation states
-pending_validations: dict[tuple[str, str], dict] = {}
+pending_validations: Any = {}
 
 # active tunnels. This is of no consequence
-active_tunnels: set[tuple[WebSocketServerProtocol, WebSocketServerProtocol]] = set()
+active_tunnels: set[tuple[websockets.ServerConnection, websockets.ServerConnection]] = set()
 
 # If invite_tokens is passed for authorization
-invite_tokens = {}
+invite_tokens: dict[str, dict[str, str | float | None]] = {}
 
 invite_token = False
 
@@ -59,8 +57,6 @@ def is_valid_username_format(username: str) -> tuple[bool, str]:
 
     if not username:
         return False, "Username is required."
-    if not isinstance(username, str):
-        return False, "Username is not a string."
     if not username.islower():
         return False, "Username must only contain lowercase alphabetical characters and/or numerical characters."
     if not username[0].isalpha():
@@ -75,7 +71,7 @@ def is_valid_username_format(username: str) -> tuple[bool, str]:
         return False, "Username 'server' is not for you bro 😤"
     return True, ""
 
-async def handle_registration(websocket, bound_username:str) -> str | None:
+async def handle_registration(websocket:websockets.ServerConnection, bound_username:str) -> str | None:
     TIMEOUT = 10
     MAX_ATTEMPTS = 4
     attempts = 0
@@ -164,7 +160,7 @@ async def handle_registration(websocket, bound_username:str) -> str | None:
             return None
 
 
-async def broadcast(websocket:websockets.legacy.server.WebSocketServerProtocol, user_reg_id:dict[str, websockets.legacy.server.WebSocketServerProtocol], user_reg_web:dict[websockets.legacy.server.WebSocketServerProtocol, str]) -> None:
+async def broadcast(websocket:websockets.ServerConnection, user_reg_id:dict[str, websockets.ServerConnection], user_reg_web:dict[websockets.ServerConnection, str]) -> None:
     try:
         async for message in websocket:
 
@@ -203,6 +199,8 @@ async def broadcast(websocket:websockets.legacy.server.WebSocketServerProtocol, 
             #### Connect Busy ####
             # If peer already has a `connect_request`
             if decoded.get("type") == 'connect_busy':
+                
+                requester : str | None = ""
                 requester = decoded['target'] # The one who initiated the request
                 responder = user_reg_web[websocket]
 
@@ -262,7 +260,7 @@ async def broadcast(websocket:websockets.legacy.server.WebSocketServerProtocol, 
             #### Connection Deny ####
             if decoded.get("type") == "connect_deny":
                 responder = user_reg_web[websocket]
-                requester= decoded.get("target")
+                requester= decoded["target"]
 
                 logger.info(f"[broadcast] received `connect_deny` from {responder} for {requester}")
 
@@ -282,24 +280,32 @@ async def broadcast(websocket:websockets.legacy.server.WebSocketServerProtocol, 
                 sender = user_reg_web.get(websocket)
                 secret = decoded.get("secret")
 
-                logger.info(f"[broadcast.tunnel_secret] sender: @{sender}, secret: @{secret}")
+                logger.info(f"[broadcast.tunnel_secret] Received Message Of Type tunnel_secret")
+                print(f"----\nsender: {sender} ) has sent their secret: {secret[:2] if isinstance(secret, str) else None}...\n----")
+                logger.debug(f"[broadcast.tunnel_secret] sender: @{sender}, secret: @{secret}")
+
 
                 # Find the pending validation involving this sender
                 for (a, b), val_data in list(pending_validations.items()):
                     if sender in (a, b):
                         val_data["secrets"][sender] = secret
 
-                        logger.info(f"[broadcast.tunnel_secret] Tunnel Secrets now: {pending_validations}")
+                        logger.debug(f"[broadcast.tunnel_secret] Tunnel Secrets now: {pending_validations}")
                         
                         # check if both responded
                         if len(val_data["secrets"]) == 2:
                             s1, s2 = val_data["secrets"].values()
                             ws1, ws2 = val_data["websockets"]
+                            u1, u2 = user_reg_web.get(ws1), user_reg_web.get(ws2)
                             
-                            logger.info(f"[broadcast.tunnel_secret] Both have entered secrets.\n{(a, b)}: {val_data['secrets']} ")
+                            print(f"----\nBoth Users `{u1}` and `{u2}` have entered their secrets. Moving to Validation.\n----")
+                            logger.debug(f"[broadcast.tunnel_secret] Both have entered secrets.\n{(a, b)}: {val_data['secrets']} ")
 
                             if s1 == s2:
                                 # Success
+                                logger.debug(f"[broadcast.tunnel_secret] validation of secrets successful. Adding websockets to `active_tunnels`")
+                                print(f"----\nValidation Successful.\nEstablishing peer to peer relay between `{u1}` and `{u2}`.\n----")
+                            
                                 # add the websockets to the active_tunnels holder
                                 active_tunnels.add((ws1, ws2))
 
@@ -316,31 +322,44 @@ async def broadcast(websocket:websockets.legacy.server.WebSocketServerProtocol, 
                                 ))
                             else:
                                 # Failure
+                                logger.debug(f"[broadcast.tunnel_secret] validation of secrets unsuccessful. Adding usernames to `blocked_usernames`. Closing connection with clinets.")
+                                print("----\nValidation Unsuccessful. Adding usernames to block list.\n----")
+                                
                                 for u in (a, b):
+
                                     blocked_usernames.add(u)
+
                                 await ws1.send(encode_message(
                                     type="tunnel_failed",
                                     sender="Server",
                                     message="Validation failed. This username is now blocked."
                                 ))
+
                                 await ws2.send(encode_message(
                                     type="tunnel_failed",
                                     sender="Server",
                                     message="Validation failed. This username is now blocked."
                                 ))
+
                                 await ws1.close()
+                                print(f"----\nClosed connection with {u1}\n----")
+                                
                                 await ws2.close()
+                                print(f"----\nClosed connection with {u2}\n----")
 
                             del pending_validations[(a, b)]
 
             if decoded.get('type') == 'key_share':
-                sender = user_reg_web.get(websocket)
+                sender = user_reg_web[websocket]
                 target = decoded.get('target')
                 key = decoded.get('key')
-                logger.info(f'[broadcast.key_share] Received Public key from @{sender}: {key}')
                 
+                logger.info("[broadcast.key_share] received message of type `key_share`")
+                logger.debug(f'[broadcast.key_share] Received Public key from @{sender}: {key}')
+                print(f"----\nReceived Public Key From `{sender}`. Relaying to `{target}`\n----")
+
                 if target in user_reg_id:
-                    target_websocket = user_reg_id.get(target)
+                    target_websocket = user_reg_id[target]
                     await target_websocket.send(
                         encode_message(
                             type='key_share',
@@ -354,15 +373,17 @@ async def broadcast(websocket:websockets.legacy.server.WebSocketServerProtocol, 
                     await websocket.send(encode_message(
                         type="connect_error",
                         sender="Server",
-                        message=f"Requester @{requester} not found."
+                        message=f"Requester @{target} not found."
                     ))
 
             #### TUNNEL EXIT ####
             if decoded.get("type") == "tunnel_exit":
+                logger.info(f"[broadcast.tunnel_exit] received message of type `tunnel_exit`")
+                
                 source_user = user_reg_web.get(websocket)
                 target_user = decoded.get("target")
 
-                logger.info(f"[broadcast] received `tunnel_exit` by {source_user}. Forwarding to {target_user}")
+                logger.debug(f"[broadcast] received `tunnel_exit` by {source_user}. Forwarding to {target_user}")
                 
                 # checking if target's connected
                 if not source_user or not target_user or target_user not in user_reg_id:
@@ -387,27 +408,32 @@ async def broadcast(websocket:websockets.legacy.server.WebSocketServerProtocol, 
                     # Remove the pair from active_tunnels
                     for ws_pair in list(active_tunnels):
                         if websocket in ws_pair:
-                            logger.info(f'[broadcast.tunnel_exit] Removing ({source_user, target_user}) from active tunnel set')
+                            logger.debug(f'[broadcast.tunnel_exit] Removing ({source_user, target_user}) from active tunnel set')
                             active_tunnels.remove(ws_pair)
                     
                     # Log the updated active tunnel set
-                    logger.info(f'Updated Active Tunnel Set: {active_tunnels}')                
+                    logger.debug(f'Updated Active Tunnel Set: {active_tunnels}')                
+                    print(f"----\nUsers `{source_user}` and `{target_user}` have ended the tunnel.\n----")
 
             if decoded.get('type') == 'encrypted_message':
+                logger.info("[broadcast.encrypted_message] received message of type `encrypted_message`")
+                
                 source_user = user_reg_web.get(websocket)
                 target_user = decoded.get('target')
 
-                logger.info(f'[broadcast.encrypted_message.debug] Target: `{target_user}`')
-
                 # Log the event
-                logger.info(f'[broadcast] Received `encrypted_message` from {source_user}. Relaying to {target_user} ')
+                logger.debug(f'[broadcast] Received `encrypted_message` from {source_user}. Relaying to {target_user} ')
+                print(f"----\nReceived Encrypted Message From `{source_user}`, Relaying To `{target_user}`\n----")
 
                 # Relay the payload
                 # Check for the presence of peer connection
                 # Check for the presence in active_tunnel
                 # If any of the peer is not present in any of either, respond to the sender with a connect error
                 source_user_web = websocket
-                target_user_web = user_reg_id.get(target_user)
+                target_user_web : websockets.ServerConnection | None = None
+
+                if target_user:
+                    target_user_web = user_reg_id.get(target_user)
                 if (not source_user) or (not target_user) or (target_user not in user_reg_id):
                     await source_user_web.send(
                         encode_message(
@@ -422,7 +448,7 @@ async def broadcast(websocket:websockets.legacy.server.WebSocketServerProtocol, 
                             # Relay the message
                             await target_user_web.send(message=message)
                         else:
-                            source_user_web.send(
+                            await source_user_web.send(
                                 encode_message(
                                     type='connect_error',
                                     sender='Server',
@@ -445,36 +471,42 @@ async def broadcast(websocket:websockets.legacy.server.WebSocketServerProtocol, 
             
             # Normal broadcast (only for idle chat)
             if decoded["type"] == 'chat_message':
+                logger.info(f"[broadcast] Received message of type `chat_message`")
 
                 # this is to create a list for logging, it has not functional use
                 broadcast_to = list(user_reg_web.values())
                 current_user = user_reg_web.get(websocket)
                 if current_user in broadcast_to:
                     broadcast_to.remove(current_user)
-
-                logger.info(f"[broadcast] Received message from: {user_reg_web.get(websocket)}\nDecoded message: {decode_message(str(message))}\nBroadcasting to these users: {broadcast_to}")
                 
+                # logger.debug(f"[broadcast] Received message from: {current_user}\nDecoded message: {decode_message(str(message))}\nBroadcasting to these users: {broadcast_to}")
+
                 # Before broadcasting, we have to make sure not to broadcast to active tunnel users
                 # For this, since we have the `active_tunnels` of type set[tuple], we will create a new one dimensional iterable object to help speed up the iteration
-                active_tunnels_iter:set[WebSocketServerProtocol] = set()
+                active_tunnels_iter:set[websockets.ServerConnection] = set()
                 for ws_pair in active_tunnels:
                     active_tunnels_iter.add(ws_pair[0])
                     active_tunnels_iter.add(ws_pair[1])
 
                 for client_ws in user_reg_id.values():
                     if client_ws != websocket and client_ws not in active_tunnels_iter:
+                        print(f"----\nBroadcasting message from `{current_user}` to {user_reg_web.get(client_ws)}\n----")
                         await client_ws.send(message)
 
     except websockets.exceptions.ConnectionClosed:
         pass
 
-async def handler(websocket):
+async def handler(websocket: websockets.ServerConnection):
     """Handles incoming websocket connections and registration of users."""
     global invite_tokens
 
     # Extract the token from connection info
-    token = websocket.request.headers.get('Authorization')
-    token_bound_username = None
+    token = None
+    
+    if websocket.request:
+        token = websocket.request.headers.get('Authorization')
+    
+    token_bound_username: str = ""
     
     if invite_token:
         if not token or (token not in invite_tokens):
@@ -482,8 +514,9 @@ async def handler(websocket):
             await websocket.close(code=4001, reason='Invalid or missing token')
             return
         
-        token_bound_username = invite_tokens[token]['username']
-        
+        token_bound_username = str(invite_tokens[token]['username'])
+
+        # Handling Consumption of unbound tokens here, apart from this block, the rest will be for bind tokens.
         if not token_bound_username:
             del invite_tokens[token]
             logger.info(f'[handler] Consuming token {token}. Updated invite_tokens: {invite_tokens}')
@@ -498,12 +531,12 @@ async def handler(websocket):
             logger.info("[handler] Registration failed or timed out")
             return
 
-        if token_bound_username and username:
-            del invite_tokens[token]
+        # Consume (Delete) the token only if reuse is false else leave it to the automatic cleanup/deletion using expiry via `check_tunnel_timeouts`
+        if token and token_bound_username and username and not invite_tokens[token]['reuse'] :
+            if token:
+                del invite_tokens[token]
 
         # Register the user in the user registry
-        logger.info(f"[handler] Registering user '{username}' with websocket {websocket}")
-
         # Store the websocket connection in the user registry
         # This allows us to keep track of connected users and their respective websockets
         user_registry_by_id[username] = websocket
@@ -513,7 +546,8 @@ async def handler(websocket):
         user_registry_by_websocket[websocket] = username
 
         # Log the registration
-        logger.info(f"[handler] [+] User '{username}' has been registered with {websocket}")
+        logger.debug(f"[handler] [+] User '{username}' has been registered with {websocket}")
+        print(f"----\n[+] User `{username}` has been registered\n----")
         
         # Send a confirmation message back to the client
         confirmation_message = make_register_message(username=username)
@@ -549,9 +583,11 @@ async def handler(websocket):
 
         # Remove the user from the user registry
         if username in user_registry_by_id:
+            
             del user_registry_by_id[username]
             del user_registry_by_websocket[websocket]
-            logger.info(f"[handler] [-] User '{username}' has been removed from the registry.")
+            
+            logger.debug(f"[handler] [-] User '{username}' has been removed from the registry.")
         
         # Remove the pair if present from the active_tunnel when faced a client disconnect instead of a tunnel disconnect via exit_tunnel
         for ws_pair in list(active_tunnels):
@@ -563,12 +599,13 @@ async def handler(websocket):
                 active_tunnels.remove(ws_pair)
 
                 # Log the updated active tunnel set
-                logger.info(f'[handler] updated active tunnel set: {active_tunnels}')
+                logger.debug(f'[handler] updated active tunnel set: {active_tunnels}')
 
         # Notify all connected clients about the disconnection
         disconnect_message = make_user_disconnected_message(username=username) # type: ignore
-        logger.info(f"[handler] [!] User '{username}' has disconnected. Sending disconnection message to all clients.")
-        print('user_registry_update: ', user_registry_by_id)      
+        logger.debug(f"[handler] [!] User '{username}' has disconnected. Sending disconnection message to all clients.")
+        logger.debug(f'[handler] user_registry_update: ', user_registry_by_id)
+        print(f"----\n[-] User `{username}` has disconnected. Sending Disconnection message to all clients.\n----")
         
         # Send the disconnection message to all connected clients
         # This informs all other clients that the user has disconnected
@@ -576,7 +613,7 @@ async def handler(websocket):
         # And while informing the clients, there are two flows:
         # We should not inform the disconnection of general users to tunnel users to not disturb the session
         # if a tunnel user is disconnected, all the users should be informed
-        active_tunnels_iter = set()
+        active_tunnels_iter: set[websockets.ServerConnection] = set()
         for ws_pair in active_tunnels:
             active_tunnels_iter.add(ws_pair[0])
             active_tunnels_iter.add(ws_pair[1])
@@ -594,7 +631,7 @@ async def handler(websocket):
                     # If the client is already disconnected, we can ignore this error
                     logger.info(f"[handler] [!] Client {client_ws} is already disconnected.")
 
-# If one user never sends their secret, the pending_validations entry remains forever. We should schedule a timeout cleanup task.
+# If one user never sends their secret, the pending_validations entry remains forever. We should schedule a timeout cleanup task. Also for expired tokens
 async def check_tunnel_timeouts():
     while True:
         now = asyncio.get_event_loop().time()
@@ -618,8 +655,9 @@ async def check_tunnel_timeouts():
         # Clean Up Expired Invite Tokens
         expired_tokens = [
             tok for tok, meta in invite_tokens.items() 
-            if meta['expiry'] is not None and now > meta['expiry']
+            if isinstance(meta['expiry'], (float, int)) and now > meta['expiry']
             ]
+        
         for tok in expired_tokens:
             del invite_tokens[tok]
 
@@ -644,7 +682,8 @@ def parse_args():
     p.add_argument('--bind', nargs='+', help='optional list of usernames to bind tokens to (only when --invite-token used)')
     p.add_argument('--token-count', type=int, help='how many tokens to create per bound username or globally')
     p.add_argument('--no-expiry', action='store_true', help='remove expiration of tokens. The tokens will however be discarded when server is closed.')
-    
+    p.add_argument('--reuse', action='store_true', help='reuse the token indefinetly until the server is closed. only available for bind tokens')
+
     # 👇 Add version flag
     try:
         pkg_version = version("oldie-goldie")
@@ -665,7 +704,7 @@ def validate_args(args: argparse.Namespace):
     # If --bind was given (non-empty list), it must be accompanied by --invite-token
     if args.bind is not None and len(args.bind) > 0:
         if not args.invite_token:
-            logger.error("[validate_args] Error: --bind is only valid together with --invite-token", file=sys.stderr)
+            logger.error("[validate_args] Error: --bind is only valid together with --invite-token")
             sys.exit(1)
         
         # Edge cases
@@ -684,23 +723,32 @@ def validate_args(args: argparse.Namespace):
     # If --token-count was given, it must be accompanied by --invite-token
     if args.token_count is not None:
         if not args.invite_token:
-            logger.error("[validate_args] Error: --token-count is only valid together with --invite-token", file=sys.stderr)
+            logger.error("[validate_args] Error: --token-count is only valid together with --invite-token")
             sys.exit(1)
         if args.token_count <= 0:
-            logger.error("[validate_args] Error: --token-count must be > 0", file=sys.stderr)
+            logger.error("[validate_args] Error: --token-count must be > 0")
             sys.exit(1)
 
     # If --invite-token is requested, require either token_count or at least one bind username
     if args.invite_token:
         has_bind = (args.bind is not None and len(args.bind) > 0)
         has_token_count = (args.token_count is not None and args.token_count > 0)
+        
         if not (has_bind or has_token_count):
-            logger.error("[validate_args] Error: when using --invite-token you must pass either --token-count N (N>0) or --bind <username> [users...]", file=sys.stderr)
+            logger.error("[validate_args] Error: when using --invite-token you must pass either --token-count N (N>0) or --bind <username> [users...]")
             sys.exit(1)
+        
         if has_bind and has_token_count:
+        
             if args.token_count < len(args.bind):
                 logger.error("[validate args] Error: When using both --bind and --token-count, the value for --token-count must not be less than the number of usernames provided via --bind.\nExplanation:\nThe --token-count value determines the total number of tokens to generate. Tokens are first mapped to the usernames passed via --bind. Any remaining tokens (up to the specified count) will be generated as unmapped tokens.\nExample:\n--bind user1 user2 --token-count 3\n→ Generates two mapped tokens (for user1 and user2) and one unmapped token.")
                 sys.exit(1)
+        
+    # Handle the case of --reuse flag which should be available only when --bind is used
+    if args.reuse:
+        if not args.invite_token and not args.bind and not len(args.bind) > 0:
+            logger.error("[validate_args] Error: --reuse can be used only with --bind. And unbound (general) tokens cannot be reused")
+            sys.exit(1)
 
     # If --no-expiry is used without --invite-tokens
     if args.no_expiry:
@@ -713,13 +761,20 @@ def launch_tunnel(port: int) -> Optional[TunnelManager]:
     Launch an ephemeral cloudflared tunnel to localhost:port.
     Returns a TunnelManager or None if cloudflared not found or failed to start.
     """
-    cmd = shutil.which('cloudflared')
+   # Try pycloudflared first (auto-downloads Cloudflare binary)
+    cmd = shutil.which('pycloudflared')
+
+    # Fallback to system-installed cloudflared
     if not cmd:
-        print('❌ Cloudflared not found on PATH.')
-        print('Install it from: https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/install-and-setup/installation/')
+        cmd = shutil.which('cloudflared')
+
+    if not cmd:
+        print("❌ Neither pycloudflared nor cloudflared found.")
+        print("Install via: pip install pycloudflared")
         return None
 
-    print(f"✅ Launching Cloudflare tunnel for localhost:{port} ...")
+    print(f"✅ Launching Cloudflare tunnel on port {port} using {cmd}...")
+
     try:
         proc = subprocess.Popen(
             [cmd, 'tunnel', '--url', f"http://localhost:{port}"],
@@ -747,7 +802,7 @@ async def wait_for_tunnel_url(manager: TunnelManager, timeout: float = 5.0) -> O
     return manager.url  # might be None
 
 # Invite Token Generation
-def generate_invite_tokens(args):
+def generate_invite_tokens(args: argparse.Namespace):
     """Generate Invite Tokens if invite_tokens is true in the args dictionary.
     Added to Validtions:
     1. If bind is passed, there is no need of passing the token_count.
@@ -762,7 +817,9 @@ def generate_invite_tokens(args):
 
     invite_token = True
 
+    # Expiry of tokens in accordance with --no-expiry flag
     expiry_time = (time.time() + 600) if not args.no_expiry else None # Token valid for 10 minutes
+    
     expiry_display = None
 
     if expiry_time:
@@ -772,38 +829,73 @@ def generate_invite_tokens(args):
         expiry_display = expiry_time
 
     if args.invite_token:
+        
         if args.bind:
+            
+            logger.info("[generate_invite_tokens] Generating Bind Tokens")
+
             for username in args.bind:
                 # These are mapped tokens
                 token = secrets.token_urlsafe(16)
-                invite_tokens[token] = {"username":username, "expiry":expiry_time}
-                logger.info(f"[generate_invite_tokens] [+] Mapped Token for {username}: {token} with Expiry (in minutes): {expiry_display}")
+
+                # Handling --reuse flag
+                if args.reuse:
+                    invite_tokens[token] = {'username':username, 'expiry': expiry_time, 'reuse': True}
+                
+                else:
+                    invite_tokens[token] = {"username":username, "expiry":expiry_time, 'reuse': False}
+                
+                logger.debug(f"[generate_invite_tokens] [+] Mapped Token for {username}: {token} with Expiry (in minutes): {expiry_display} and {'can be REUSED within expiry' if args.reuse else 'cannot be REUSED'}")
+                print(f"----\nusername: {username}, token: {token}, expiry: {expiry_display} min, Reuse (until expiry): {True if args.reuse else False}\n----")
+            
             if args.token_count and args.token_count > len(args.bind):
+                
+                logger.info("[generate_invite_tokens] Generating Unbound (General) Tokens")
+
                 # If both --bind and --token-count are present
                 for _ in range (args.token_count - len(args.bind)):
                     # These are left out unmapped tokens after mapped tokens are done generating
                     token = secrets.token_urlsafe(16)
                     invite_tokens[token] = {"username": None, "expiry": expiry_time}
-                    logger.info(f"[generate_invite_tokens] [+] General Token, Username: None, Token: {token}, Expiry (in minutes): {expiry_display}")
+                    logger.debug(f"[generate_invite_tokens] [+] General Token, Username: None, Token: {token}, Expiry (in minutes): {expiry_display}")
+                    print(f"----\nusername: None, token: {token}, expiry: {expiry_display} min")
+
+
         else:
             # Only if --token-count is given
+            logger.info("[generate_invite_tokens] Generating Unbound (General) Tokens")
             for _ in range (args.token_count):
                 token = secrets.token_urlsafe(16)
                 invite_tokens[token] = {"username": None, "expiry": expiry_time}
-                logger.info(f"[+] General Token: {token}, Expiry (in minutes): {expiry_display}")
+                logger.debug(f"[generate_invite_tokens] [+] General Token: {token}, Expiry (in minutes): {expiry_display}")
+                print(f"----\ntoken: {token}, expiry: {expiry_display} min")
+                
 
-async def process_request(connection, request):
+async def process_request(connection: websockets.ServerConnection, request: websockets.Request):
     """
     This runs before the websocket handshake.
     We can reject unauthorized clients here.
     """
+    logger.info('[process_request] Inside Process Request')
+
     now = time.time()
+    
+    logger.debug('[process_request] Triggering token cleanup')
+    logger.debug(f"[process_request] Current invite_tokens:\n{invite_tokens}")
 
     # Clean up expired tokens
-    expired = [tok for tok, meta in invite_tokens.items() if now > meta["expiry"]]
+    expired = [
+        tok for tok, meta in invite_tokens.items()
+        if isinstance(meta['expiry'], (float, int)) and now > meta["expiry"]]
+    
     for tok in expired:
+
+        logger.debug(f"[process_request] Deleting Token: {invite_tokens[tok]}")
+
         del invite_tokens[tok]
     
+    logger.debug(f"[process_request] Updated Invite Tokens:\n{invite_tokens}")
+
      # Skip check if no tokens configured
     if not invite_token:
         return None  # continue to handshake
@@ -827,13 +919,19 @@ async def process_request(connection, request):
 
         # Send response directly over the transport
         try:
+            logger.info(f"[process_request] Sending 401 to the client")
             connection.transport.write(response)
+        
         # yield control to flush socket buffer
             await asyncio.sleep(0)
+        
         except Exception as e:
             logger.error(f"[process_request] Error sending response: {e}")
+        
         finally:
+            logger.info("[process_request] Closing Client TCP connection")
             connection.transport.close()
+        
         return # stop handshake
         
     

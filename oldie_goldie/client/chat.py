@@ -347,7 +347,7 @@ async def start_tunnel_validation(peer: str):
     
     finally:
         input_future = None
-        set_input_mode('chat')
+        # set_input_mode('chat')
 
 # ========================== #
 # Connection Commands
@@ -564,7 +564,6 @@ async def send_messages(websocket: websockets.ClientConnection, username: str):
             if input_mode == "psk":
                 # Only prompt once
                 if input_future and not input_future.done():
-                    prompt_text = FormattedText([(' bold','')])
                     message = await safe_input(prompt='🔐 Enter PSK: ', password=True, color='ansiyellow')
                     input_future.set_result(message)
                 set_input_mode('locked')
@@ -1071,6 +1070,8 @@ if __name__ == "__main__":
         logger.info("[root] Connection Sucessfully Closed.")
     except websockets.exceptions.InvalidStatus:
         logger.info("[root] Invalid Auth Token")
+    except websockets.exceptions.InvalidURI:
+        logger.error("[root] Invalid URI. Please check the url passed via --url argument. URI Scheme should be of either wss or wss or http or https.")
 
 def cli():
     """Entry point for 'og-client' command."""

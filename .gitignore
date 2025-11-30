@@ -1,9 +1,6 @@
 # Ignore the log files which also include my progress log or any other log dump
 **/logs/
 
-# Ignore the cache files
-**/__pycache__
-
 # Ignore the tests dir
 tests/
 
@@ -16,9 +13,18 @@ tests/
 # But do not ignore .github
 !.github
 
-# Ignore artifacts
+# Python packaging
+oldie_goldie/oldie_goldie.egg-info/
+*.egg-info/
+
 **/dist/
+build/
+## Ignore the cache files
+**/__pycache__
+*.pyc
 
 # Ignore static site files generated my mkdocs
 
 **/site/
+oldie_goldie/oldie_goldie.egg-info/PKG-INFO
+oldie_goldie/oldie_goldie.egg-info/requires.txt

@@ -1,7 +1,7 @@
 # 🐍 Python Compatibility Guide
 
-Oldie-Goldie aims to support modern Python versions across Windows, macOS, and Linux.  
-Because the project uses cryptographic dependencies with native components, compatibility depends on upstream wheels.
+Oldie-Goldie supports modern Python versions on Windows, macOS, and Linux.  
+Because the project relies on cryptographic packages with native components, compatibility depends on upstream wheel availability.
 
 ---
 
@@ -13,48 +13,48 @@ Because the project uses cryptographic dependencies with native components, comp
 | **3.11** | ✅ Supported | Stable |
 | **3.12** | ✅ Supported | Stable |
 | **3.13** | ✅ Supported | Stable |
-| **3.14** | ❌ Not yet supported | Pending upstream wheels |
+| **3.14** | ❌ Not supported | Missing upstream wheels |
 
 ---
 
 ## ❗ Why Python 3.14 Is Not Supported Yet
 
-Python 3.14 introduces ABI/runtime changes that require C extension packages to publish updated wheels.  
-These packages currently do **not** provide 3.14 wheels:
+Python 3.14 introduces ABI/runtime changes that require C-extension packages to release updated wheels.  
+As of now, these libraries **do not ship 3.14 wheels**:
 
-- `cffi`
-- `cryptography`
-- Transitive dependencies
+- `cryptography`  
+- `cffi`  
+- Their transitive dependencies  
 
-As a result, pip attempts to **compile from source**, triggering failures like:
+Because of this, pip tries to **compile from source**, typically resulting in errors like:
 
 ```powershell
 Microsoft Visual C++ 14.0 or greater is required
 error: Failed to build 'cffi'
 ```
 
-Once upstream wheels land on PyPI, Oldie-Goldie will enable 3.14 support automatically.
+Once wheels are published for all platforms, Oldie-Goldie will automatically enable 3.14 support.
 
-Track progress here:  
-<https://github.com/venukotamraju/Oldie-Goldie/issues>
+Track progress:  
+🔗 <https://github.com/venukotamraju/Oldie-Goldie/issues>
 
 ---
 
-## 🧪 Workarounds for Contributors
+## 🧪 Workarounds for Developers
 
 You do **not** need to uninstall Python 3.14.  
-Choose one of the following recommended approaches:
+Create an isolated environment with a supported version:
 
 ---
 
-### 🟩 Option 1 — Conda Environment (Recommended for Windows)
+### 🟩 Option 1 — Conda (Recommended for Windows)
 
 ```bash
 conda create -n og-dev python=3.13
 conda activate og-dev
 ```
 
-Works out-of-the-box with zero compiler requirements.
+Zero compiler requirements.
 
 ---
 
@@ -69,32 +69,32 @@ Keeps system Python untouched.
 
 ---
 
-### 🟪 Option 3 — asdf (Cross-Platform)
+### 🟪 Option 3 — asdf (Cross-platform)
 
 ```bash
 asdf install python 3.13.1
 asdf local python 3.13.1
 ```
 
-Very reliable for multi-language setups.
+Ideal for multi-language setup consistency.
 
 ---
 
 ## 🔮 Roadmap for 3.14 Support
 
-Oldie-Goldie will adopt Python 3.14 once:
+Oldie-Goldie will adopt Python 3.14 once the ecosystem provides:
 
-1. `cffi` publishes official wheels  
-2. `cryptography` updates to depend on them  
-3. Wheels exist for Windows, macOS, and Linux  
-4. Installation succeeds without compilers  
+1. Official 3.14 wheels for `cffi`  
+2. Updated `cryptography` wheels depending on that release  
+3. Complete wheel coverage across Windows, Linux, macOS  
+4. Installation that requires **no compilers**  
 
-Until then, 3.14 remains unsupported for stability and developer experience.
+Until then, 3.14 is intentionally disabled to avoid build errors and confusing installation failures.
 
 ---
 
-## 📚 See Also
+## 📚 Related Documentation
 
 - **Developer Guide:** [`developer-guide.md`](developer-guide.md)  
-- **Contributing Guide:** [`CONTRIBUTING.md`](../CONTRIBUTING.md)  
-- **Project Homepage:** [`index.md`](index.md)  
+- **Usage Guide:** [`usage.md`](usage.md)  
+- **Overview:** [`index.md`](index.md)  

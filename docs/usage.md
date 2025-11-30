@@ -1,8 +1,6 @@
 # 💬 Usage Guide
 
-> full CLI options + examples
-
-This guide walks through running the Oldie-Goldie server and client, using tunnels, invite tokens, and peer-to-peer encrypted sessions.
+This guide explains how to run the Oldie-Goldie **server** and **client**, use **invite tokens**, and establish **encrypted peer-to-peer tunnels**.
 
 ---
 
@@ -10,41 +8,41 @@ This guide walks through running the Oldie-Goldie server and client, using tunne
 
 Oldie-Goldie supports **Python 3.10–3.13**.
 
-If you're using Python 3.14, please read:  
-📄 **[Python Compatibility Guide](python-compatibility.md)**
+If you're on Python 3.14, read:  
+📄 **[Python Compatibility](python-compatibility.md)**
 
 ---
 
 ## 🖥️ Running the Server
 
-Oldie-Goldie includes an interactive server that supports:
+The server can run in:
 
-- Local mode  
-- Public mode (via Cloudflared tunnel)  
-- Invite-token mode  
-- Bound-token mode  
+- **Local mode** (no internet, LAN-only)  
+- **Public mode** (Cloudflared tunnel)  
+- **Invite-token mode** (access control)  
+- **Bound-token mode** (strictest)  
 
 ---
 
 ### 🔒 Local Server
 
-Runs the server on your machine with no tunnel.
-
 ```bash
 og-server --host local
 ```
 
-Useful for:
+Use for:
 
-- Development  
+- LAN testing  
 - Offline usage  
-- LAN-only communication  
+- Development  
+
+No tunneling or tokens required.
 
 ---
 
 ### 🌍 Public Server (Cloudflared Tunnel)
 
-Creates a temporary HTTPS-accessible public endpoint.
+Creates a temporary HTTPS URL using Cloudflared:
 
 ```bash
 og-server --host public
@@ -52,47 +50,49 @@ og-server --host public
 
 The server will:
 
-1. Launch a Cloudflared tunnel  
-2. Generate a temporary public URL  
-3. Display it for sharing  
+1. Auto-launch a Cloudflared tunnel  
+2. Show a public URL  
+3. Allow peers to connect using that URL  
 
-Your peer can connect directly using that URL.
+Cloudflared is automatically managed via **pycloudflared**.
 
 ---
 
 ### 🔑 Invite-Protected Server
 
-Limit access using auto-generated tokens.
+Restrict access using auto-generated one-time tokens:
 
 ```bash
 og-server --host public --invite-token --token-count 2
 ```
 
-- Tokens are single-use unless `--no-expiry` is used  
-- Great for semi-trusted use cases  
-- Prevents random users from joining your temporary public server  
+Characteristics:
+
+- Tokens expire after 10 minutes (default)
+- By default, tokens are single-use
+- Good for semi-trusted environments
 
 ---
 
-### 🧍‍♂️🧍 Bound Token Mode (Strictest)
+### 🧍‍♂️🧍 Bound Tokens (Strictest Mode)
 
-Use named, pre-bound tokens for two specific users.
+Bind tokens to specific usernames:
 
 ```bash
 og-server --host public --invite-token --bind alice bob
 ```
 
-This mode ensures:
+Ensures:
 
-- Only *Alice* and *Bob* can join  
-- Tokens cannot be borrowed or brute-forced  
-- Only these two users can tunnel with each other  
+- Only *Alice* and *Bob* can join
+- Tokens cannot be used by others
+- Only these two can tunnel with each other
 
 ---
 
 ## 💻 Running the Client
 
-The client connects to a running server and provides a command-line chat UI with encrypted tunnel support.
+The client provides a real-time chat UI with encrypted tunnel support.
 
 ---
 
@@ -104,7 +104,7 @@ og-client --server-host local
 
 ---
 
-### Remote Connection (Tunnel)
+### Remote Connection
 
 ```bash
 og-client --server-host public --url <server-url>
@@ -118,7 +118,7 @@ og-client --server-host public --url https://random-tunnel.trycloudflare.com
 
 ---
 
-### Remote Connection with Token
+### Remote Connection (Token-Protected)
 
 ```bash
 og-client --server-host public --url <server-url> --token <token>
@@ -128,13 +128,11 @@ og-client --server-host public --url <server-url> --token <token>
 
 ## 🔄 Typical Secure Conversation Flow
 
-This is the recommended sequence for a private, ephemeral, peer-to-peer encrypted chat.
+A recommended sequence for private, ephemeral communication:
 
 ---
 
 ### 1️⃣ Start the Server
-
-The host runs:
 
 ```bash
 og-server --host public
@@ -143,114 +141,114 @@ og-server --host public
 or
 
 ```bash
-og-server --host public --invite-token
+og-server --host public --invite-token --token-count <int>
+```
+
+or
+
+```bash
+og-server --host public --invite-token --bind <pseudonym1> <pseudonym2> ...
 ```
 
 ---
 
-### 2️⃣ Share the Connection Details
+### 2️⃣ Share the Required Details
 
-Send your peer:
+Share out-of-band:
 
-- The URL  
-- Optional token  
+- Public URL  
+- Invite token (if used)  
 - Agreed **pseudonyms**  
-- The **PSK (pre-shared key)**  
-
-All of this must be shared out-of-band.
+- The **PSK (pre-shared key)**
+    > *A **PSK** in this context/application is any string that only you two members, as a pair of tunnelers share/decide with each other and are aware of.*
 
 ---
 
-### 3️⃣ Register Using Pseudonyms
+### 3️⃣ Users Register via Pseudonyms
 
-Each user enters a pseudonym when connecting.
-
-Real names are discouraged.
+Real identities discouraged.
 
 ---
 
 ### 4️⃣ Verify Presence
 
-Use:
-
 ```bash
 /list_users
 ```
 
-to see who is connected.
-
 ---
 
-### 5️⃣ Initiate a Connection Request
+### 5️⃣ Initiate Tunnel Request
 
 ```bash
 /connect @username
 ```
 
-The peer will receive a request they can accept or deny.
+The peer receives a pop-up request.
 
 ---
 
 ### 6️⃣ Enter the PSK
 
-Both sides will be prompted:
+Both are prompted:
 
-```bash
+```markdown
 Enter pre-shared key:
 ```
 
 - Input is hidden  
-- Timeout protects against idle or malicious connections  
-- Keys must match **exactly**  
+- PSK must match exactly  
+- Timeout prevents hanging connections  
 
 ---
 
 ### 7️⃣ Tunnel Opens
 
-If both keys match:
+If PSKs match:
 
-- A secure, encrypted, isolated tunnel opens  
-- Only the two participants may communicate inside it  
+- An encrypted, isolated tunnel opens  
+- Only the two participants can communicate  
+- Messages bypass global chat  
 
 ---
 
-### 8️⃣ Mismatch Behavior
-
-If the keys do **not** match:
+### 8️⃣ On PSK Mismatch
 
 - Tunnel is rejected  
-- Both sides are disconnected  
-- Usernames are temporarily blocked  
-
-This prevents tunnel spamming and impersonation.
+- Both clients disconnect  
+- Usernames temporarily blocked  
+- Prevents impersonation + tunnel spam
 
 ---
 
-## 🧹 Commands Summary
+### 🧹 Commands Summary
 
-| Command | Purpose |
-|--------|---------|
-| `/list_users` | Shows currently connected users |
-| `/connect @user` | Initiates a secure tunnel request |
-| `/accept` | Accepts a connection |
-| `/deny` | Rejects a connection |
-| `/exit_tunnel` | Leaves the active encrypted tunnel |
-| `/help` | Shows help with colored output |
+| Command | Description |
+|--------|-------------|
+| `/list_users` | List connected users |
+| `/connect @user` | Request a tunnel connection |
+| `/accept` | Accept incoming tunnel request |
+| `/deny` | Reject a tunnel request |
+| `/exit_tunnel` | Leave active encrypted tunnel |
+| `/help` | Show help with colored output |
 
 ---
 
 ## ❗ Notes & Tips
 
-- Tunnel messages are **not visible** to other connected users  
-- Server logs never store chat content  
-- Cloudflared tunnels close automatically when the server shuts down  
-- If you get *input flickering*, ensure your terminal supports prompt_toolkit refresh  
-- `/exit_tunnel` cleanly resets state on both sides  
+- A token has a default expiry time of **10 minutes**. To generate *no-expiry* tokens use `--no-expiry` flag  
+- Username registration is time bound for **10 seconds**  
+- PSK entry is time bound for **10seconds**  
+- Tunnel messages are **not visible** to global users  
+- Server does **not store** chat history  
+- Cloudflared tunnel closes automatically with the server  
+- If input flickers, ensure your terminal supports `prompt_toolkit`  
+- `/exit_tunnel` resets state for both peers cleanly  
 
 ---
 
 ## 📚 Related Documentation
 
 - **Developer Guide** → [`developer-guide.md`](developer-guide.md)  
-- **Compatibility Guide** → [`python-compatibility.md`](python-compatibility.md)
+- **Compatibility Guide** → [`python-compatibility.md`](python-compatibility.md)  
 - **Project Overview** → [`index.md`](index.md)  

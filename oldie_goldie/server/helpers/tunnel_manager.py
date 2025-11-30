@@ -35,7 +35,7 @@ class TunnelManager:
                         m = self.URL_REGEX.search(line)
                         if m:
                             self.url = m.group(0)
-                            print(f"🌐 Tunnel active at: {self.url}")
+                            print(f"🌐 Tunnel active at ↓↓↓\n====\n{self.url}\n====")
         except Exception as e:
             # reader thread should never crash silently
             print("Error reading cloudflared output:", e, file=sys.stderr)

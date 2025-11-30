@@ -14,6 +14,79 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [v0.6.0] - 2025-11-28
+
+This release delivers major functional improvements to tunneling, authentication, usability, documentation, and platform compatibility. It introduces automatic Cloudflared handling, invite-token reuse, enhanced PSK validation workflow, expanded docs, and broader Python version support.
+
+### 🚀 Added
+
+#### **Automatic Cloudflared Integration**
+
+- Integrated **`pycloudflared`** for automatic download, management, and invocation of the Cloudflared binary.
+- Replaced manual system-level binary discovery with environment-scoped resolution.
+- Removes the previous requirement for users to download Cloudflared manually.
+- Simplifies setup for Windows, Linux, and virtual environments.
+
+#### **Token Reuse Flag (`--reuse`)**
+
+- Added `--reuse` flag to enable **reuse of bound invite tokens**.
+- Tokens may be reused **until expiration** (default: 10 minutes).
+- Added new `metadata["reuse"]` attribute to `invite_tokens` dictionary.
+- Implemented server-side validation + client handling adjustments.
+
+#### **PSK Validation Workflow Tightening**
+
+- During tunnel handshake, the client’s input mode **remains locked** after entering the PSK.
+- Input unlocks only after server acceptance or timeout.
+- Prevents premature input switching and improves validation integrity.
+
+#### **Documentation System**
+
+- Added full **MkDocs** site with:
+  - `index.md`
+  - `usage.md`
+  - `developer-guide.md`
+  - `python-compatibility.md`
+  - `changelog.md`
+- Introduced GitHub Pages pipeline for auto-building docs on push to `main`.
+- Added `RELEASE.md` with release workflow checklist.
+- Added `CONTRIBUTING.md` with contributor guidelines.
+
+### 🧩 Compatibility Improvements
+
+- Updated dependency constraints: replaced strict pinned versions with ranges for better future Python compatibility.
+- Improved compatibility for Python 3.12–3.13.
+- Declared **Python 3.14 as not supported** due to upstream C-extension wheel availability.
+- Updated Trove classifiers and `requires-python` metadata.
+- Added new compatibility documentation (`Compatibility.md` + MkDocs page).
+
+### 🛠 Improvements
+
+- Improved log formatting and prompt clarity across server and client.
+- Cleaned linting issues on server code path.
+- Updated README with clearer installation guidance, compatibility badges, and Cloudflared notes.
+- Extended GitHub Actions CI/CD:
+  - Conditional PyPI / TestPyPI publishing based on tag types (`a`, `b`, `rc`, or stable).
+  - Documentation auto-deploy to GitHub Pages.
+- Improved tunnel and token code structure for future maintainability.
+- Added pretty printer/log refinements for easier debugging.
+
+### 🐛 Fixes
+
+- Corrected license naming mismatch in README and `pyproject.toml`.
+- Fixed inconsistent development-status classifier tags affecting PyPI metadata.
+- Patched minor PSK handshake edge cases during tunnel validation.
+- Fixed subtle client mode switching behavior around tunnel validation and timeouts.
+
+### 🔮 Future / Planned
+
+- Termux / Android support for Cloudflared + client operation.
+- Architecture documentation rewrite (developer-guide expansion).
+- Expanded color support and prompt styling for `safe_input`.
+- More robust runtime token generation from server-side CLI.
+
+---
+
 ## [v0.4.1] - 2025-11-13
 
 _Features and fixes added since `v0.4.1` milestone._

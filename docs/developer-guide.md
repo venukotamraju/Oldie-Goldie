@@ -1,57 +1,52 @@
-# 🔧 Developer Guide
+# 🔧 Developer Guide  
 
-> architecture, contribution, env setup
+Technical Internals · Architecture · Development Setup
 
-This guide explains the internal architecture, the development environment, and how to contribute safely and effectively to Oldie-Goldie.
+This guide explains how Oldie-Goldie works internally, how to set up a development environment, and how to contribute safely and effectively.
 
 ---
 
-## 🐍 Python Compatibility (Important)
+## 🐍 Python Compatibility
 
 Oldie-Goldie supports:
 
-- **Python 3.10 – 3.13** ✔️  
-- **Python 3.14** ❌ *Temporarily unsupported*
+- ✔️ **Python 3.10 – 3.13**  
+- ⚠️ **Python 3.14** — *temporarily unsupported* (missing upstream wheels for `cryptography`, `cffi`, etc.)
 
-Python 3.14 is not yet supported because upstream dependencies (`cffi`, `cryptography`, etc.) have not released wheels for it.  
-This leads to installation failures such as:
+If your system Python is 3.14, you **do not** need to uninstall it.  
+Use a dedicated environment:
 
-```bash
-error: Failed to build 'cffi'
-Microsoft Visual C++ 14.0 or greater is required
-```
+---
 
-If your system Python is 3.14, you can still contribute using the methods below (no need to uninstall 3.14).
+### Recommended Development Environments
 
-### Recommended environments
-
-#### **Conda (easiest — Windows/macOS/Linux)**
+#### ▶ Conda (Windows/macOS/Linux — easiest)
 
 ```bash
 conda create -n og-dev python=3.13
 conda activate og-dev
 ```
 
-#### **pyenv (Linux/macOS/WSL)**
+#### ▶ pyenv (Linux/macOS/WSL)
 
 ```bash
 pyenv install 3.13.1
 pyenv local 3.13.1
 ```
 
-#### **asdf (cross-platform)**
+#### ▶ asdf (cross-platform)
 
 ```bash
 asdf install python 3.13.1
 asdf local python 3.13.1
 ```
 
-➡️ For detailed compatibility notes, see:  
-[`python-compatibility.md`](python-compatibility.md)
+For detailed compatibility notes:  
+📄 **[`python-compatibility.md`](python-compatibility.md)**
 
 ---
 
-## 📁 Repo Setup
+## 📁 Repository Setup
 
 ```bash
 git clone https://github.com/venukotamraju/Oldie-Goldie.git
@@ -61,69 +56,132 @@ python -m pip install -r requirements.txt
 pip install -e .
 ```
 
-### 🔬 Run Tests Locally
-
-```bash
-# No tests yet. (Coming soon.)
-```
+This installs the package in editable mode.
 
 ---
 
-## 🏗 Architecture Overview
+## 🧩 Project Architecture (High-Level)
+
+Oldie-Goldie uses a **minimal, auditable, privacy-first** architecture.
 
 ```markdown
-Client ── handshake ──> Server ── establishes Cloudflared tunnel ──> Peer Client
-                ↳ PSK validation
-                ↳ token restrictions (optional)
+Client ── handshake ──> Server ── Cloudflared Tunnel ──> Peer Client
+          ↳ token validation (optional)
+          ↳ PSK authentication
+          ↳ encrypted tunnel (peer-to-peer messaging)
 ```
 
-### Key Principles
+### Key Behaviors
 
-- The server **never stores messages** (no logs, no history)
-- Tunnels are **ephemeral** and destroyed on disconnect
-- All validation (token auth, PSK match, username checks) occurs **before** tunnel is established
+- **No message storage**  
+  Server relays encrypted packets only; logs never contain message bodies.
 
-The architecture is intentionally minimalistic for easier auditing and maximum privacy guarantees.
+- **Ephemeral tunnels**  
+  Tunnel is created only when requested and torn down automatically on disconnect.
+
+- **Modular client state machine**  
+  States: `idle → request_sent / request_received → validating → tunnel_active`.
+
+- **Decoupled encryption**  
+  Encryption is performed client-side using a derived shared session key.
+
+- **Token subsystem**  
+  Supports single-use, reusable, bound, and non-expiring tokens.
 
 ---
 
-## 🤝 Contributing Workflow
+## 🧱 Module Overview
 
-1. **Fork** the repository  
+A brief map of where core logic lives:
+
+| Module | Purpose |
+|--------|---------|
+| `server/` | Server runtime, token validation, tunnel management |
+| `client/` | Client runtime, input system, state machine |
+| `shared/protocol/` | Message types, encryption/decryption flow |
+| `shared/crypto/` | PSK → hashing → shared key → AES encryption |
+| `client/helpers/` | Crypto helpers, key handling, client-side encryption utilities |
+| `server/helpers` | Cloudflared integration & management |
+| `utilities/` | Logging, async helpers, I/O wrappers |
+
+This structure keeps privacy-critical code easy to audit.
+
+---
+
+## ▶ Running Locally in Dev Mode
+
+### Start the server
+
+```bash
+cd oldie_goldie
+python -m server.server --host local
+```
+
+### Start one or more clients
+
+```bash
+cd oldie_goldie
+python -m client.chat --server-host local
+```
+
+Use `/list_users`, `/connect`, and `/exit_tunnel` to test tunnel flows.
+
+---
+
+## 🧪 Tests
+
+Automated test suite coming soon.
+
+Planned coverage:
+
+- Token flows  
+- PSK handshake timeout/mismatch  
+- Encryption round-trip  
+- State machine transitions  
+- Cloudflared invocation logic  
+
+---
+
+## 🤝 Contributing
+
+1. **Fork** the repo  
 2. Create a **feature branch**  
-3. Write clean, descriptive commit messages  
+3. Make your changes with clean commit messages  
 4. Submit a **pull request** to `main`
 
-Issues and feature proposals are welcome:  
-<https://github.com/venukotamraju/Oldie-Goldie/issues>
+Issues, ideas, and proposals are welcome:  
+🔗 <https://github.com/venukotamraju/Oldie-Goldie/issues>
 
 ---
 
 ## 📝 Notes for Developers
 
-### Platform Markers Explained
+### Why platform markers matter
 
-Dependencies such as `cryptography` and `cffi` ship C/Rust extensions.  
-To ensure Oldie-Goldie installs cleanly on all OSes and Python versions, platform markers are used:
+Some dependencies include C/Rust extensions and must match your OS + Python version.  
+Examples:
 
-```bash
-cryptography>=42,<50 ; sys_platform != 'emscripten'
-cffi>=1.15,<2        ; platform_machine != 'wasm32'
+```text
+cryptography>=42,<50 ; sys_platform != "emscripten"
+cffi>=1.15,<2        ; platform_machine != "wasm32"
 ```
 
-This prevents pip from attempting to install incompatible wheels in WebAssembly environments while keeping support stable on:
+These prevent pip from installing incompatible wheels in unsupported environments (like WASM).
 
-- Windows  
-- Linux  
-- macOS  
+### Cloudflared Integration
 
-Python 3.10–3.13 currently supported.  
-Python 3.14 support will be added once upstream wheels become available.
+Oldie-Goldie uses:
+
+- **pycloudflared** for automatic download  
+- seamless binary discovery per-environment  
+- subprocess-based tunnel lifecycle
+
+This eliminates manual installation for Windows/Linux/macOS.
 
 ---
 
-## 📚 Additional Docs
+## 📚 Related Documentation
 
-- **Compatibility Guide:** [`python-compatibility.md`](python-compatibility.md)
-- **Usage Guide:** [`usage.md`](usage.md)
-- **Project Overview & Landing Page:** [`index.md`](index.md)
+- **Usage Guide** → [`usage.md`](usage.md)  
+- **Compatibility Guide** → [`python-compatibility.md`](python-compatibility.md)  
+- **Overview & Landing Page** → [`index.md`](index.md)  
