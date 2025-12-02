@@ -1,19 +1,20 @@
 import asyncio
+from typing import Any
 import websockets
 import logging
 import base64
 from datetime import datetime
 import argparse
 
-from .helpers.tunnel_activity import TunnelActivityUtilsForOG
+from oldie_goldie.client.helpers.tunnel_activity import TunnelActivityUtilsForOG
 
-from shared import encode_message, decode_message, make_register_message,make_system_request
-from shared import version_banner
-from shared import SecureMethodsForOG
+from oldie_goldie.shared import encode_message, decode_message, make_register_message,make_system_request
+from oldie_goldie.shared import version_banner
+from oldie_goldie.shared import SecureMethodsForOG
 
 # Importing the CommandHandler class from shared.command_handler module
 # This class is responsible for managing commands and their execution in the chat client.
-from shared import CommandHandler
+from oldie_goldie.shared import CommandHandler
 
 from importlib.metadata import version, PackageNotFoundError
 
@@ -192,7 +193,10 @@ async def safe_input(prompt: str = "> ", password: bool = False, color: str = No
             )
 
     except (KeyboardInterrupt, EOFError):
-        logger.warning("[safe_input] Keyboard interrupt or EOF detected")
+        
+        logger.debug("[safe_input] Keyboard interrupt or EOF detected")
+        await aprint("----\n<ansiyellow>!</ansiyellow> <ansigray>Received Keyboard Interrupt</ansigray>\n----")
+        
         raise KeyboardInterrupt
 
 
@@ -209,13 +213,19 @@ async def confirm_exit() -> bool:
     while True:
         response = await safe_input(prompt="Confirm your will to exit (y/n) ", color='ansired')
         response = response.strip().lower()
+        
         if response == "y":
             return True
+        
         elif response == "n":
-            logger.info(msg="[confirm_exit] Resuming chat. User decided not to exit.")
+            
+            logger.debug(msg="[confirm_exit] Resuming chat. User decided not to exit.")            
             return False
+        
         else:
-            logger.warning("You have to enter something [y/n]. come on -_-")
+
+            logger.debug("You have to enter something [y/n]. come on -_-")
+            await aprint("----\n<ansigray>You have to enter something [y/n]. come on -_-</ansigray>\n----")
 
 # ======================== #
 # Built-in Commands
@@ -226,14 +236,22 @@ async def confirm_exit() -> bool:
 # Register built-in commands
 async def cmd_exit(_: str):
     """ Command to exit the chat client """
-    logger.info("[cmd_exit] User requested exit command.")
+    
+    logger.debug("[cmd_exit] User requested exit command.")
+    
     should_exit = await confirm_exit()
     
     if should_exit:
-        logger.info("[cmd_exit] User confirmed exit. Raising CancelledError to signal shutdown.")
+        
+        logger.debug("[cmd_exit] User confirmed exit. Raising CancelledError to signal shutdown.")
+        await aprint("----\n<ansired>Exit Confirmed</ansired>\n----")
+        
         raise asyncio.CancelledError
+    
     else:
-        logger.info("[cmd_exit] User chose not to exit. Resuming chat.")
+        
+        logger.debug("[cmd_exit] User chose not to exit. Resuming chat.")
+        await aprint("----\n<ansigreen>Exit Revoked, Resuming Chat</ansigreen>\n----")
 
 async def cmd_help(_: str):
     """ Command to display help information """
@@ -264,7 +282,7 @@ async def cmd_help(_: str):
 async def cmd_whoami(_: str):
     """ Command to display the client's registered username """
 
-    await aprint(f"\nYou are registered as:\nusername: '{current_username}'")
+    await aprint(f"----\nYou are registered as:\n<ansigray>username</ansigray>: '<ansiyellow>{current_username}</ansiyellow>'\n----")
 
 command_handler.register_command("/exit", cmd_exit)
 command_handler.register_command("/help", cmd_help)
@@ -275,7 +293,7 @@ command_handler.register_command("/whoami", cmd_whoami)
 # Connection State
 # ========================== #
 
-connection_state = {
+connection_state: dict[str, str | None] = {
     "status": "idle",   # idle, request_sent, request_received, wait_tunnel_trigger, tunnel_validating, tunnel_active
     "target": None,     # Who we are talking to or requesting
     "direction": None,  # incoming or outgoing
@@ -287,8 +305,8 @@ TUNNEL_TIMEOUT = 10 # seconds
 async def reset_connection_state():
     """Helper to reset the connection state."""
 
-    logger.info("[reset_connection_state] Resetting connection state to idle.")
-    await aprint()
+    logger.debug("[reset_connection_state] Resetting connection state to idle.")
+    await aprint("----\n<ansigray>Resetting Your Connection State</ansigray>\n----")
 
     connection_state.update({
         "status": "idle",
@@ -302,8 +320,8 @@ async def start_tunnel_validation(peer: str):
 
     connection_state["status"] = "tunnel_validating"
 
-    logger.info(f"[start_tunnel_validation] Private tunnel with @{peer} requires PSK entry.")
-    await aprint()
+    logger.debug(f"[start_tunnel_validation] Private tunnel with @{peer} requires PSK entry.")
+    await aprint(f"----\nPrivate tunnel with @<ansicyan>{peer}</ansicyan> requires PSK entry\n----")
 
     set_input_mode("psk")
     input_future = asyncio.get_event_loop().create_future()
@@ -332,17 +350,23 @@ async def start_tunnel_validation(peer: str):
             )
         )
 
-        logger.info("[start_tunnel_validation] PSK submitted. Waiting for server confirmation.")
-        await aprint()
+        logger.debug("[start_tunnel_validation] PSK submitted. Waiting for server confirmation.")
+        await aprint("----\n<ansigray>PSK submitted\nAwaiting for server confirmation.</ansigray>\n----")
         
         return True
     
     except (KeyboardInterrupt, EOFError):
-        logger.warning("[start_tunnel_validation] Validation interrupted. Closing tunnel.")
+        
+        logger.debug("[start_tunnel_validation] Validation interrupted. Closing tunnel.")
+        await aprint("----\n<ansired>!</ansired> <ansigray>Validation interrupted\nClosing tunnel.</ansigray>\n----")
+
         return False
 
     except asyncio.TimeoutError:
-        logger.warning("[start_tunnel_validation] PSK entry timed out. Connection attempt cancelled.")
+        
+        logger.debug("[start_tunnel_validation] PSK entry timed out. Connection attempt cancelled.")
+        await aprint("----\n<ansired>!</ansired> <ansigray>PSK entry timed out\nConnection attempt cancelled.</ansigray>\n----")
+        
         return False
     
     finally:
@@ -352,21 +376,30 @@ async def start_tunnel_validation(peer: str):
 # ========================== #
 # Connection Commands
 # ========================== #
-def cmd_connect(line: str):
+async def cmd_connect(line: str):
     """ Initiate a connection request to another user """
 
     parts = line.strip().split()
     if len(parts) != 2 or not parts[1].startswith("@"):
-        logger.warning("[cmd_connect] Usage: /connect @username")
+        
+        logger.debug("[cmd_connect] Usage: /connect @username")
+        await aprint("----\n<ansicyan>?</ansicyan> <ansigray>Usage:</ansigray> /connect @username\n----")
+        
         return
     
     target_username = parts[1][1:]  # Remove the '@' symbol
     if target_username == "":
-        logger.warning("[cmd_connect] Invalid username. Please provide a valid username starting with '@'.")
+        
+        logger.debug("[cmd_connect] Invalid username. Please provide a valid username starting with '@'.")
+        await aprint("----\n<ansicyan>?</ansicyan><ansired>!</ansired> <ansigray>Invalid username\nPlease provide a valid username starting with '@'.</ansigray>\n----")
+        
         return
     
     if connection_state["status"] != "idle":
-        logger.warning("[cmd_connect] Already in a connection state. Use /pending or /deny.")
+        
+        logger.debug("[cmd_connect] Already in a connection state. Use /pending or /deny.")
+        await aprint("----\n<ansicyan>?</ansicyan><ansired>!</ansired> <ansigray>You already are in a connection state\nTip: Use</ansigray>\n`<ansicyan>/pending</ansicyan>`: To view pending requests\n`<ansicyan>/deny</ansicyan>`: To deny pending requests.\n----")
+        
         return
 
     connection_state.update({
@@ -375,7 +408,8 @@ def cmd_connect(line: str):
         "direction": "outgoing",
     })
 
-    logger.info(f"[cmd_connect] Connection request sent to @{target_username}.")
+    logger.debug(f"[cmd_connect] Connection request sent to @{target_username}.")
+    await aprint(f"----\n<ansigray>Connection request sent to</ansigray> @<ansiyellow>{target_username}</ansiyellow>\n----")
 
     # Send message to server (async task)
     task = asyncio.create_task(
@@ -396,12 +430,17 @@ async def cmd_accept(_: str):
     """ Accept a pending incoming connection request """
     
     if connection_state["status"] != "request_received":
-        logger.info("[cmd_accept] No incoming connection request.")
+
+        logger.debug("[cmd_accept] No incoming connection request.")
+        await aprint("----\n<ansigray>No incoming connection request.</ansigray>\n----")
+
         return
     
     peer = connection_state["target"]
-    logger.info(f"[cmd_accept] Accepting connection from @{peer}")
     
+    logger.debug(f"[cmd_accept] Accepting connection from @{peer}")
+    await aprint(f"----\n<ansigray>Accepting connection from @</ansigray><ansiyellow>{peer}</ansiyellow>\n----")
+
     task = asyncio.create_task(
         active_websocket.send(
             encode_message(
@@ -419,14 +458,23 @@ async def cmd_deny(_: str):
     """ Deny a pending incoming/outgoing connection """
     
     if connection_state["status"] not in ("request_received", "request_sent"):
-        logger.info("[cmd_deny] No incoming request to deny.")
+        
+        logger.debug("[cmd_deny] No incoming request to deny.")
+        await aprint("----<ansigray>No pending request to deny.</ansigray>----\n")
+        
         return
     
     peer = connection_state["target"]
     if connection_state["direction"] == "outgoing":
-        logger.info(f"[cmd_deny] Cancelled our outgoing connection request to @{peer}.")
+        
+        logger.debug(f"[cmd_deny] Cancelled outgoing connection request to @{peer}.")
+        await aprint(f"----\n<ansigray>Cancelled outgoing connection request to @</ansigray><ansiyellow>{peer}</ansiyellow>.\n----")
+
     else:
-        logger.info(f"[cmd_deny] Denied connection request from @{peer}.")
+        
+        logger.debug(f"[cmd_deny] Denied connection request from @{peer}.")
+        await aprint(f"----\n<ansigray>Denied incoming connection request from @</ansigray><ansiyellow>{peer}</ansiyellow>.\n----")
+
     await reset_connection_state()
 
     task = asyncio.create_task(
@@ -446,7 +494,10 @@ async def cmd_exit_tunnel(_: str):
     """Exit the active private tunnel."""
 
     if connection_state["status"] != "tunnel_active":
-        logger.info("[cmd_exit_tunnel] No active tunnel.")
+        
+        logger.debug("[cmd_exit_tunnel] No active tunnel.")
+        await aprint("----\n<ansigray>No active tunnel to exit from.</ansigray>\n----")
+        
         return
     
     # Notify Server that a peer has exited the tunnel, so that that server would forward the same to the fellow peer, and they too can reset their state.
@@ -462,17 +513,24 @@ async def cmd_exit_tunnel(_: str):
     )
     await wait_and_log_task(task, "cmd_exit_tunnel")
 
-    logger.info(f"[cmd_exit_tunnel] Tunnel with @{connection_state['target']} closed.")
+    logger.debug(f"[cmd_exit_tunnel] Tunnel with @{connection_state['target']} closed.")
+    await aprint(f"----\n<ansigray>Tunnel closed with @</ansigray><ansiyellow>{connection_state['target']}</ansiyellow>\n----")
+    
     await reset_connection_state()
     set_input_mode('chat')
 
-def cmd_pending(_: str):
+async def cmd_pending(_: str):
     """ Check the current connection state """
     status = connection_state["status"]
     if status == "idle":
-        logger.info("[cmd_pending] No active or pending connections.")
+        
+        logger.debug("[cmd_pending] No active or pending connections.")
+        await aprint("----\nNo active or pending connections.\n----")
+    
     else:
-        logger.info(f"[cmd_pending] Status: {connection_state['status']}, Target: @{connection_state['target']}, Direction: {connection_state['direction']}")
+        
+        logger.debug(f"[cmd_pending] Status: {connection_state['status']}, Target: @{connection_state['target']}, Direction: {connection_state['direction']}")
+        await aprint(f"----\n<ansigray>Status:</ansigray> {connection_state['status']}\n<ansigray>Target:</ansigray> @<ansiyellow>{connection_state['target']}</ansiyellow>\n<ansigray>Direction:</ansigray> {connection_state['direction']}\n----")
 
 async def cmd_list_users(_:str):
     """
@@ -481,7 +539,7 @@ async def cmd_list_users(_:str):
     await active_websocket.send(
         message = make_system_request(need='list_users', username=current_username)
     )
-    logger.info('[cmd_list_users] Sent a request to server for a list of users.')
+    logger.debug('[cmd_list_users] Sent a request to server for a list of users.')    
 
 # Helper for task logging (to make sonarQube happy)
 async def wait_and_log_task(task: asyncio.Task, context: str):
@@ -516,7 +574,7 @@ async def handle_chat_input(message: str, websocket: websockets.ClientConnection
 
             except asyncio.CancelledError:
                 # If the command raises a CancelledError, we handle it here
-                logger.info("[send_messages] Command execution cancelled. Exiting message loop.")
+                logger.debug("[send_messages] Command execution cancelled. Exiting message loop.")
                 
                 # This exception is raised when the /exit is processed and confirmed from the send_messages() 
                 # which raises and propogates `exception of the same` up-ward towards the event loop 
@@ -530,7 +588,9 @@ async def handle_chat_input(message: str, websocket: websockets.ClientConnection
 
         # If the command is not recognized, we log a warning
         else:
-            logger.warning(f"[send_messages] Command '{message}' not recognized. Use /help to see available commands.")
+            
+            logger.debug(f"[send_messages] Command '{message}' not recognized. Use /help to see available commands.")
+            await aprint(f"----\n<ansired>?</ansired> <ansigray>Command</ansigray> `<ansired>{message}</ansired>` <ansigray>not recognized\nUse</ansigray> <ansicyan>/help</ansicyan> <ansigray>to see available commands.</ansigray>\n----")
     
     # Send the message if everything is fine
     else:
@@ -555,8 +615,10 @@ async def send_messages(websocket: websockets.ClientConnection, username: str):
     while True:
         try:
             if input_mode != previous_mode:
-                logger.info(f"[send_messages] Mode changed: {previous_mode} → {input_mode}")
-                await aprint()                
+                
+                logger.debug(f"[send_messages] Mode changed: {previous_mode} → {input_mode}")
+                await aprint(f"...\nMode changed: {previous_mode} → {input_mode}\n...")
+                
                 previous_mode = input_mode
                 set_input_mode(input_mode)
 
@@ -571,22 +633,28 @@ async def send_messages(websocket: websockets.ClientConnection, username: str):
                 continue
             
             elif input_mode in ('chat', 'encrypted'):
-                message = await safe_input()
+                message = await safe_input(prompt=f"Enter {input_mode} message: ", color="ansibrightmagenta")
                 
                 # If the message is empty, we skip sending it
                 if message:
                     if message.strip() == "":
-                        logger.info("[send_messages] Empty message entered. Skipping send.")
-                        await aprint()
+                        
+                        logger.debug("[send_messages] Empty message entered. Skipping send.")
+                        await aprint("----\n<ansigray>Empty message entered. Skipping send.</ansigray>")
+
                     else:
                         if input_mode == 'chat':
                             await handle_chat_input(message=message,websocket=websocket, username=username, session_key=None)
+                        
                         elif input_mode == 'encrypted':
                             session_key = tunnel_utils.get_session_key()
+                            
                             if session_key:
                                 await handle_chat_input(message=message, websocket=websocket, username=username, session_key=session_key)
+                            
                             else:
-                                logger.error('[send_messages] No session key, switching input mode to chat')
+                                
+                                logger.debug('[send_messages] No session key, switching input mode to chat')
                                 set_input_mode('chat')
             
             elif input_mode == "locked":
@@ -601,18 +669,20 @@ async def send_messages(websocket: websockets.ClientConnection, username: str):
             # This is a good place to handle any cleanup or final messages before exiting.
             # This is also caught in the main method to handle the cancellation of tasks.
                         
-            logger.warning("[send_messages] Keyboard interrupt detected. Exiting message loop.")
+            logger.debug("[send_messages] Keyboard interrupt detected. Exiting message loop.")
             break
 
         except asyncio.CancelledError:
-            logger.info("[send_messages] Task cancelled cleanly.")
+            logger.debug("[send_messages] Task cancelled cleanly.")
             raise
 
         except websockets.exceptions.ConnectionClosed:
             # This exception occurs when the websocket connection is closed from/by the server
             # or if the server is not running.
             
-            logger.warning("[send_messages] Websocket connection closed from/by server.")
+            logger.debug("[send_messages] Websocket connection closed from/by server.")
+            await aprint("----\n<ansired>!</ansired> <ansigray>Connection Closed From/By Server</ansigray>\n----")
+            
             return
 
         except Exception as e:
@@ -636,8 +706,8 @@ async def receive_messages(websocket: websockets.ClientConnection):
                 peer = decoded.get("sender")
                 if connection_state["status"] == 'idle':
                     
-                    logger.info(f"[receive_messages] Incoming connection request from @{peer}. Use /accept or /deny.")
-                    await aprint()
+                    logger.debug(f"[receive_messages] Incoming connection request from @{peer}. Use /accept or /deny.")
+                    await aprint(f"----\n<ansigray>Incoming connection request from @</ansigray><ansiyellow>{peer}</ansiyellow>\n<ansigray>Use</ansigray> <ansicyan>/accept</ansicyan> or <ansicyan>/deny</ansicyan>\n----")
 
                     connection_state.update({
                         "status": "request_received", 
@@ -658,17 +728,23 @@ async def receive_messages(websocket: websockets.ClientConnection):
             elif msg_type in ('connect_busy', 'connect_error'):
                 peer = decoded.get("sender")
                 message = decoded.get("message")
-                await aprint(f"{peer}: {message}")
+                await aprint(f"----\n<ansiyellow>{peer}</ansiyellow>: <ansigray>{message}</ansigray>\n----")
                 await reset_connection_state()
 
             elif msg_type == "connect_accept":
                 peer = decoded.get("sender")
-                logger.info(f"[receive_messages] @{peer} accepted your connection request.")
+                
+                logger.debug(f"[receive_messages] @{peer} accepted your connection request.")
+                await aprint(f"----\n<ansigray>Connection request accepted by @</ansigray> <ansiyellow>{peer}</ansiyellow>\n----")
+
                 connection_state["status"] = "wait_tunnel_trigger"
 
             elif msg_type == "connect_deny":
                 peer = decoded.get("sender")
-                logger.info(f"[receive_messages] @{peer} denied your connection request.")
+                
+                logger.debug(f"[receive_messages] @{peer} denied your connection request.")
+                await aprint(f"----\n<ansigray>Connection request denied by @</ansigray> <ansiyellow>{peer}</ansiyellow>\n----")
+                
                 await reset_connection_state()
             
             # ==========================
@@ -678,7 +754,9 @@ async def receive_messages(websocket: websockets.ClientConnection):
             elif msg_type == 'tunnel_validate':
                 # Start PSK validation prompt for the initiator
                 peer = decoded.get("sender")
-                logger.info("[receive_messages.tunnel_validate] Triggering tunnel validation.")
+                
+                logger.debug("[receive_messages.tunnel_validate] Triggering tunnel validation.")
+                await aprint("----\n<ansiblue>!</ansiblue> <ansigray>Triggering Tunnel Validation</ansigray>\n----")
 
                 task = asyncio.create_task(start_tunnel_validation(peer=str(peer)))
                 psk_entry = await task
@@ -690,8 +768,8 @@ async def receive_messages(websocket: websockets.ClientConnection):
                 peer = connection_state['target']
 
                 # Server confirms PSK exchange
-                logger.info("[receive_messages.tunnel_ok_key_init] Tunnel PSK confirmed. Invoking key share.\n")
-                await aprint()
+                logger.debug("[receive_messages.tunnel_ok_key_init] Tunnel PSK confirmed. Invoking key share.\n")
+                await aprint("----\n<ansigreen>!</ansigreen> <ansigray>Tunnel PSK confirmed\nInvoking key share</ansigray>\n----")
 
                 connection_state["status"] = "tunnel_active"
                 input_mode = "chat"
@@ -704,7 +782,10 @@ async def receive_messages(websocket: websockets.ClientConnection):
                 await task
 
             elif msg_type == "tunnel_failed":
-                logger.info("[receive_messages] Tunnel validation failed. PSK mismatch.")
+                
+                logger.debug("[receive_messages] Tunnel validation failed. PSK mismatch.")
+                await aprint("<ansibrightred>----</ansibrightred>\n<ansired>!</ansired> Tunnel validation failed\n<ansired>Bye Bye !</ansired>\n<ansibrightred>----</ansibrightred>")
+                
                 await reset_connection_state()
                 input_mode = "chat"
             
@@ -716,7 +797,9 @@ async def receive_messages(websocket: websockets.ClientConnection):
                 encoded_public_key = decoded.get('key')
                 if connection_state.get('target') == sender:
                     tunnel_utils.set_peer_public_key(encoded_peer_public_key=encoded_public_key)
-                    logger.info(f"[receive_messages] Received Public Key from @{sender}")
+                    
+                    logger.debug(f"[receive_messages] Received Public Key from @{sender}")
+                    await aprint(f"----\n<ansigreen>!</ansigreen> <ansigray>Received Public Key from @</ansigray><ansiyellow>{sender}</ansiyellow>\n----")
 
                     # invoke handler for session secret
                     if tunnel_utils.get_peer_public_key_bytes():
@@ -730,19 +813,25 @@ async def receive_messages(websocket: websockets.ClientConnection):
                     set_input_mode('encrypted')
             
             elif msg_type == client_event_types['ENCRYPTED_MESSAGE']:
+                
                 logger.debug(f'[receive_messages.encrypted_message] Received message: {decoded}')
+                
                 readable_timestamp = datetime.fromisoformat(decoded.get('timestamp'))
                 sender = decoded.get('sender','unknown')
                 text = decoded.get('message','')
                 _type = decoded.get('type','')
-                await aprint(f"\n[{readable_timestamp}] [{_type}] {sender}: {text}")                
+                
+                await aprint(f"\n[{readable_timestamp}] [{_type}] <ansiyellow>{sender}</ansiyellow>: {text}")                
 
             # ========================== 
             # Tunnel Exit Event
             # ========================== 
 
             elif msg_type == "tunnel_exit":
-                logger.info(f"[receive_messages] {decoded.get('message')}")
+                
+                logger.debug(f"[receive_messages] {decoded.get('message')}")
+                await aprint(f"---\n{decoded.get('message')}\n---")
+                
                 await reset_connection_state()
                 await tunnel_utils.reset()
                 set_input_mode('chat')
@@ -754,7 +843,13 @@ async def receive_messages(websocket: websockets.ClientConnection):
                 readable_timestamp = datetime.fromisoformat(decoded['timestamp'] if decoded['timestamp'] != '???' else '???')
                 sender = decoded.get('sender')
                 res_obj = decoded.get('res_info')
-                logger.info(f'[receive_messages.system_response.list_users] [{readable_timestamp}] {sender}: {res_obj}')
+                formatted_list = None
+
+                if res_obj:
+                    formatted_list = ['<ansiyellow>' + name + '</ansiyellow>' for name in res_obj]
+                
+                logger.debug(f'[receive_messages.system_response.list_users] [{readable_timestamp}] {sender}: {res_obj}, type:{type(res_obj)}')
+                await aprint(f'{sender}: {formatted_list}')
 
             # ========================== 
             # Disconnection Event
@@ -763,8 +858,8 @@ async def receive_messages(websocket: websockets.ClientConnection):
             elif msg_type == "user_disconnected":
                 user = decoded.get("username")
                 
-                logger.info(f"[receive_messages] User @{user} disconnected.")
-                await aprint()
+                logger.debug(f"[receive_messages] User @{user} disconnected.")
+                await aprint(f"----\n@<ansiyellow>{user}</ansiyellow> <ansigray>disconnected</ansigray>\n----")
                 
                 if connection_state.get("target") == user:
                     await reset_connection_state()
@@ -779,20 +874,21 @@ async def receive_messages(websocket: websockets.ClientConnection):
                 readable_timestamp = datetime.fromisoformat(timestamp) if timestamp != '???' else '???'
                 sender = decoded.get("sender", "unknown")
                 text = decoded.get("message", "")
-                await aprint(f"\n[{readable_timestamp}] {sender}: {text}")
+                await aprint(f"\n[{readable_timestamp}] <ansiyellow>{sender}</ansiyellow>: {text}")
 
         except websockets.exceptions.ConnectionClosed:
             # This exception occurs when a keyboard interrupt is experienced 
             # which first interrupts the event_loop where the websocket connection is 
             # terminated and as a side effect this exception is recognised.
             
-            logger.warning("[receive_messages] Websocket connection closed from/by server")
+            logger.debug("[receive_messages] Websocket connection closed from/by server")
+            await aprint("----\n<ansired>!</ansired> <ansigray>Connection Closed From/By Server</ansigray>\n----")
             return
 
         except asyncio.CancelledError:
             # When this task detects the propogation of cancellation signal in the event loop.
 
-            logger.info("[receive_messages] Task received cancellation signal.")
+            logger.debug("[receive_messages] Task received cancellation signal.")
             raise
 
         except Exception as e:
@@ -819,7 +915,10 @@ async def ask_for_username() -> str:
         if username.strip():
             return username.strip()
         else:
-            logger.warning("[ask_for_username] Username cannot be empty. Please try again.")
+            
+            logger.debug("[ask_for_username] Username cannot be empty. Please try again.")
+            await aprint("----\n<ansired>!</ansired> Username cannot be empty\nPlease try again\n----")
+
 
 async def handle_username_registration(websocket) -> str | None:
     """Handle timed username registration with retries and feedback from the server"""
@@ -834,7 +933,8 @@ async def handle_username_registration(websocket) -> str | None:
         try:
             return await safe_input(prompt='Enter Username: ', color='ansiyellow')
         except KeyboardInterrupt:
-            logger.info("[handle_username_registration] Suppressed KeyboardInterrupt *inside* safe_username_input.")
+            
+            logger.debug("[handle_username_registration] Suppressed KeyboardInterrupt *inside* safe_username_input.")
             
             # Return a Sentinel Value (object or str)
             return INTERRUPT_SENTINEL
@@ -860,13 +960,19 @@ async def handle_username_registration(websocket) -> str | None:
             if timer_task in done:
                 username_task.cancel()
                 await asyncio.gather(username_task, return_exceptions=True)                
-                logger.warning("[handle_username_registration] Time expired waiting for input")
+                
+                logger.debug("[handle_username_registration] Time expired waiting for input")
+                await aprint("----\n<ansired>!</ansired> Time expired waiting for input\n----")
+                
                 return None
             
             username_input = await username_task
            
             if username_input == INTERRUPT_SENTINEL:
-                logger.info("[handle_username_registration] KeyboardInterrupt detected from input task. Exiting registration.")
+                
+                logger.debug("[handle_username_registration] KeyboardInterrupt detected from input task. Exiting registration.")
+                await aprint("----\n<ansired>!</ansired>KeyboardInterrupt\nExiting registration\n----")
+                
                 return None
             
             username = (username_input or "").split()[0] if username_input else ""
@@ -874,7 +980,10 @@ async def handle_username_registration(websocket) -> str | None:
             logger.debug(msg=f"[handle_username_registration] username from task result: {username}")
             
             if not username:
-                logger.warning("❗Username cannot be empty. Try better bro...😑")
+                
+                logger.debug("❗Username cannot be empty. Try better bro...😑")
+                await aprint("----\n<ansired>!</ansired> Username cannot be empty\nTry better bro...😑\n----")
+                
                 continue
 
             await websocket.send(make_register_message(username=username)) #type: ignore
@@ -882,14 +991,16 @@ async def handle_username_registration(websocket) -> str | None:
             # Wait for the server response with remaining time
             remaining = TIMEOUT - (asyncio.get_event_loop().time() - start_time)
             if remaining <= 0:
-                await aprint("\n⏰ Time expired waiting for server response")
+                await aprint("----\n⏰ Time expired waiting for server response\n----")
                 return None
 
             response = await asyncio.wait_for(websocket.recv(), timeout=time_left)
             decoded = decode_message(response)
 
             if decoded["type"] == "user_disconnected":
-                logger.info(f"User @{decoded['username']} has disconnected.")
+                
+                logger.debug(f"User @{decoded['username']} has disconnected.")
+                await aprint(f"----\nUser @<ansiyellow>{decoded['username']}</ansiyellow> has disconnected\n----")
 
                 # Optionally: clear connection_state if this was our peer
                 if connection_state["target"] == decoded["username"]:
@@ -899,26 +1010,35 @@ async def handle_username_registration(websocket) -> str | None:
                 continue
 
             if decoded["type"] == "register":
-                logger.info(f"[handle_username_registration] Received confirmation from the server. Welcome `{username}`!")
+                
+                logger.debug(f"[handle_username_registration] Received confirmation from the server. Welcome `{username}`!")
+                await aprint(f"----\n<ansigray>Confirmation received\nWelcome</ansigray>`<ansiyellow>{username}</ansiyellow>`!----\n")
+                
                 return username #type: ignore
 
             elif decoded["type"] == "register_error":
-                await aprint(f"{decoded['message']}")
+                await aprint(f"----\n<ansired>!</ansired> {decoded['message']}\n----")
 
                 # Only increment attempts for format errors
                 if "Invalid username" in decoded["message"]:
                     attempts += 1
                 if attempts >= MAX_ATTEMPTS:
-                    await aprint("⚠️ Maximum attempts reached. Exiting.")
+                    await aprint("----\n⚠️ Maximum attempts reached\n<ansired>Exiting</ansired>\n----")
                     return None
 
         except asyncio.CancelledError:
             return None
         except asyncio.TimeoutError:
-            logger.info("\n🥚 Timeout waiting for server response.")
+            
+            logger.debug("\n🥚 Timeout waiting for server response.")
+            await aprint("----\n🥚 Timeout waiting for server response\n----")
+            
             return None
         except (KeyboardInterrupt, EOFError):
+            
             logger.info("\n Username Registration Cancelled via Keyboard Interrupt")
+            await aprint("----\n<ansired>!</ansired> Username Registration Cancelled via Keyboard Interrupt\n----")
+            
             return None
         except Exception as e:
             logger.error(f"\n Unexpected error: {e}")
@@ -994,21 +1114,25 @@ async def main():
     global active_websocket, current_username
 
     if headers:
-        logger.info(f"[main] Using Authorization header: {args.token[:6]}...")
+        
+        logger.debug(f"[main] Using Authorization header: {args.token[:6]}...")
+        await aprint(f"----\nUsing Authorization header: {args.token[:6]}...\n----")
         
     
     # Connect to the websocket server via async context manager
     async with websockets.connect(uri, additional_headers=headers) as websocket:
         
         # Log the connection to the server
-        logger.info(f"Connected to secure chat websocket server at {uri}, Beginning username registration...")
+        logger.debug(f"Connected to secure chat websocket server at {uri}, Beginning username registration...")
+        await aprint(f"----\n<ansigreen>!!</ansigreen> Connected to secure chat websocket server at {uri}\nBeginning username registration...\n----")
 
         active_websocket = websocket
         
         username = await handle_username_registration(websocket=websocket)
         
         if username is None:
-            logger.warning("[main] Username registration failed or cancelled.")
+            
+            logger.debug("[main] Username registration failed or cancelled.")
             raise asyncio.CancelledError # Gracefully exit
         
         current_username = username
@@ -1035,7 +1159,7 @@ async def main():
                     await task
                     
                 except asyncio.CancelledError:
-                    logger.info(f"[main] Cancelled pending task: {task.get_coro().__name__}")  # type: ignore    
+                    logger.debug(f"[main] Cancelled pending task: {task.get_coro().__name__}")  # type: ignore    
             
             # Get the exceptions of tasks which have not been handled appropriately 
             for task in done:
@@ -1044,15 +1168,19 @@ async def main():
                     raise task.exception() # type: ignore
                 
         except asyncio.CancelledError:
-            logger.info("[main] Main task cancelled.")
+            logger.debug("[main] Main task cancelled.")
             raise
 
         except websockets.exceptions.ConnectionClosed:
-            logger.warning("[main] Server closed the connection. Press 'Enter' to finish exiting")
+            
+            logger.debug("[main] Server closed the connection. Press 'Enter' to finish exiting")
+            await aprint("----\n<ansired>!!</ansired>Server closed the connection\nPress 'Enter' to finish exiting\n----")
+            
             raise
 
         finally:
-            logger.info("[main] All tasks completed or cancelled. The app will exit automatically. If the input seems to be blocked then press 'Enter' to finish exiting. Thanks for using Secure Chat Client :)")
+            logger.debug("[main] All tasks completed or cancelled. The app will exit automatically. If the input seems to be blocked then press 'Enter' to finish exiting. Thanks for using Secure Chat Client :)")
+            await aprint("<ansigreen>----</ansigreen>\nAll tasks completed or cancelled\nThe app will exit automatically\nIf the input seems to be blocked then press 'Enter' to finish exiting\nThanks for using <ansigreen>Oldie Goldie</ansigreen> Client :)\n<ansigreen>----</ansigreen>")
 
 
 if __name__ == "__main__":
@@ -1077,5 +1205,15 @@ def cli():
     """Entry point for 'og-client' command."""
     try:
         asyncio.run(main())
-    except KeyboardInterrupt:
-        print("[og-client] KeyboardInterrupt received. Exiting...")
+    except (KeyboardInterrupt, EOFError):
+        logger.warning("[root] Keyboard interrupt detected. Client shutting down :(")
+    except ConnectionRefusedError:
+        logger.error("[root] Connection refused - server may be offline :(")
+    except asyncio.CancelledError:
+        logger.info("[root] Shutdown handled via cancellation.")
+    except websockets.exceptions.ConnectionClosed:
+        logger.info("[root] Connection Sucessfully Closed.")
+    except websockets.exceptions.InvalidStatus:
+        logger.info("[root] Invalid Auth Token or Server Is Offline")
+    except websockets.exceptions.InvalidURI:
+        logger.error("[root] Invalid URI. Please check the url passed via --url argument. URI Scheme should be of either wss or wss or http or https.")

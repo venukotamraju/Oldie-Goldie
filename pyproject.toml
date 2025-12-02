@@ -8,7 +8,8 @@ version = "0.6.0"
 description = "Oldie Goldie — a peer-to-peer encrypted chat with tunnel and token-based access."
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
-license = { file = "LICENSE" }
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 authors = [
   { name = "Venu kotamraju", email = "kotamraju.venugopal@gmail.com" }
 ]
@@ -24,7 +25,6 @@ classifiers = [
   "Programming Language :: Python :: 3.12",
   "Programming Language :: Python :: 3.13",
   "Topic :: Communications :: Chat",
-  "License :: OSI Approved :: Apache Software License",
   "Intended Audience :: Developers",
 ]
 
@@ -54,13 +54,21 @@ Issues = "https://github.com/venukotamraju/Oldie-Goldie/issues"
 Changelog = "https://github.com/venukotamraju/Oldie-Goldie/blob/main/CHANGELOG.md"
 Documentation = "https://venukotamraju.github.io/Oldie-Goldie"
 
+# Use automatic package discovery (cleaner approach)
 [tool.setuptools.packages.find]
-where = ["oldie_goldie"]
+where = ["."]
+include = ["oldie_goldie*"]
+exclude = ["tests*", "docs*", "site*", "logs*", "*.egg-info*"]
+
+# Add this to include package data if needed
+[tool.setuptools.package-data]
+oldie_goldie = ["*.py", "**/*.py"]
+
 
 # 💡 Add command-line entry points
 [project.scripts]
-og-server = "server.server:cli"
-og-client = "client.chat:cli"
+og-server = "oldie_goldie.server.server:cli"
+og-client = "oldie_goldie.client.chat:cli"
 
 # Automated Sematic Versioning Helper
 [tool.bumpver]

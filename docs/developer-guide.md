@@ -113,15 +113,13 @@ This structure keeps privacy-critical code easy to audit.
 ### Start the server
 
 ```bash
-cd oldie_goldie
-python -m server.server --host local
+python -m oldie_goldie.server.server --host local
 ```
 
 ### Start one or more clients
 
 ```bash
-cd oldie_goldie
-python -m client.chat --server-host local
+python -m oldie_goldie.client.chat --server-host local
 ```
 
 Use `/list_users`, `/connect`, and `/exit_tunnel` to test tunnel flows.

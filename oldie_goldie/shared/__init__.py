@@ -18,7 +18,7 @@ __all__ = [
     "make_system_request",
     "make_system_response",
     "CommandHandler",
-    "BANNER",
+    "SYMBOL_BANNER",
     "SecureMethodsForOG",
     "EncryptionUtilsForOG",
     "SYMBOL_BANNER",

@@ -3,13 +3,12 @@ import time
 from typing import Any, Optional
 import websockets
 import logging
-from shared import encode_message, decode_message, make_register_message, make_user_disconnected_message, make_system_response
-from shared import version_banner
+from oldie_goldie.shared import encode_message, decode_message, make_register_message, make_user_disconnected_message, make_system_response, version_banner
 import argparse
 import sys
 import shutil
 import subprocess
-from .helpers.tunnel_manager import TunnelManager
+from oldie_goldie.server.helpers.tunnel_manager import TunnelManager
 import secrets
 from importlib.metadata import version, PackageNotFoundError
 
@@ -514,7 +513,9 @@ async def handler(websocket: websockets.ServerConnection):
             await websocket.close(code=4001, reason='Invalid or missing token')
             return
         
-        token_bound_username = str(invite_tokens[token]['username'])
+        token_bound_username: str | None = invite_tokens[token]['username']
+
+        logger.info(f"[handler] token_bound_username: {token_bound_username}, type: {bool(token_bound_username)}")
 
         # Handling Consumption of unbound tokens here, apart from this block, the rest will be for bind tokens.
         if not token_bound_username:

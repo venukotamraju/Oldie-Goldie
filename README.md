@@ -5,13 +5,17 @@
 > **A self-hostable, peer-to-peer encrypted chat system  
 with ephemeral tunnels, reusable invite tokens, and zero logs.**
 
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/oldie-goldie?period=total&units=INTERNATIONAL_SYSTEM&left_color=BLACK&right_color=MAGENTA&left_text=downloads)](https://pepy.tech/projects/oldie-goldie)
+
+---
+
 [![PyPI Version](https://img.shields.io/pypi/v/oldie-goldie)](https://pypi.org/project/oldie-goldie/)
+![Cloudflared](https://img.shields.io/badge/cloudflared-auto--managed-ec5600)
+![Security](https://img.shields.io/badge/encryption-end--to--end-green)
+![Status](https://img.shields.io/badge/status-stable-blue)
 [![Python Versions](https://img.shields.io/pypi/pyversions/oldie-goldie)](https://pypi.org/project/oldie-goldie/)
 ![Python 3.14](https://img.shields.io/badge/3.14-not%20yet%20supported-red)
 [![License: Apache](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
-![Status](https://img.shields.io/badge/status-stable-blue)
-![Cloudflared](https://img.shields.io/badge/cloudflared-auto--managed-ec5600)
-![Security](https://img.shields.io/badge/encryption-end--to--end-green)
 [![Issues](https://img.shields.io/github/issues/venukotamraju/Oldie-Goldie)](https://github.com/venukotamraju/Oldie-Goldie/issues)
 [![Last Commit](https://img.shields.io/github/last-commit/venukotamraju/Oldie-Goldie)](https://github.com/venukotamraju/Oldie-Goldie/commits/main)
 

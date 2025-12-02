@@ -6,9 +6,8 @@ first what do we need to do
 4. Compute shared secret
 """
 import websockets
-from shared import SecureMethodsForOG
+from oldie_goldie.shared import SecureMethodsForOG, encode_message
 import base64
-from shared import encode_message
 import logging
 logging.basicConfig(
     level=logging.INFO,
@@ -42,7 +41,7 @@ class TunnelActivityUtilsForOG:
             #  suitable for json transport
             encoded_pub_key_bytes = base64.b64encode(pub_key_bytes).decode()
 
-            logger.info(f'[TunnelActivityUtilsForOG.handle_key_share] Encoded Pub Key: {encoded_pub_key_bytes}')
+            logger.debug(f'[TunnelActivityUtilsForOG.handle_key_share] Encoded Pub Key: {encoded_pub_key_bytes}')
 
             # build the message to send over to server
             message = encode_message(
@@ -78,7 +77,7 @@ class TunnelActivityUtilsForOG:
     def get_psk_hash(self) -> bytes | None:
         return self._psk_hash
     
-    def get_session_key(self) -> None:
+    def get_session_key(self) -> bytes | None:
         return self._session_key
     
     async def reset(self) -> None:
